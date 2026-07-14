@@ -120,6 +120,17 @@ class ModuleRepository {
   // ── High-level Wi-Fi mode switch (the main screen) ──────────────────────
 
   /// Result of a mode switch: [ok] plus a human message for the UI.
+  ///
+  /// There are TWO separate cfg80211.ko builds on this device: ours (shipped
+  /// in system/lib/modules, ABI-matched to the injection drivers) and the
+  /// vendor's (loaded at boot from /vendor or /vendor_dlkm, ABI-matched to
+  /// qca_cld3 — different CRCs, see project memory
+  /// project_injection_cfg80211_architecture.md). Removing qca_cld3 does NOT
+  /// remove the vendor cfg80211 module itself — it stays loaded. The old
+  /// version of this script only checked "is *a* cfg80211 loaded" and skipped
+  /// insmod'ing ours if so, which meant it silently never actually switched
+  /// once the vendor one was resident. Fixed: unconditionally evict whatever
+  /// cfg80211 is currently there before loading ours.
   Future<ShellResult> switchToNetHunter(List<ModuleInfo> modules) {
     final hasCfg = modules.any((m) => m.name == 'cfg80211');
     if (!hasCfg) {
@@ -131,7 +142,10 @@ class ModuleRepository {
     b.writeln('  sleep 2');
     b.writeln('  rmmod $_vendorWifi 2>/dev/null');
     b.writeln('fi');
-    b.writeln("grep -q '^cfg80211 ' /proc/modules || insmod '$kModulesDir/cfg80211.ko' 2>&1");
+    // Whatever cfg80211 is loaded right now (vendor's, almost certainly) has
+    // to go before ours can take its place — same module name, can't coexist.
+    b.writeln('rmmod cfg80211 2>/dev/null');
+    b.writeln("insmod '$kModulesDir/cfg80211.ko' 2>&1");
     if (modules.any((m) => m.name == 'mac80211')) {
       b.writeln("grep -q '^mac80211 ' /proc/modules || insmod '$kModulesDir/mac80211.ko' 2>&1");
     }
@@ -141,6 +155,16 @@ class ModuleRepository {
 
   /// Unwind our whole stack and bring the stock vendor Wi-Fi back without a
   /// reboot if possible. Verifies via /proc/modules rather than assuming.
+  ///
+  /// The vendor's own cfg80211.ko (see switchToNetHunter's doc) still has to
+  /// be reloaded BEFORE qca_cld3 — qca_cld3 won't insmod against our cfg80211
+  /// (wrong symbol versions). It's a vendor file we never touched, so it
+  /// should still be sitting wherever it was at boot; this searches for it
+  /// rather than guessing a fixed path, same as it already did for qca_cld3.
+  /// Whether cnss2 (the platform driver actually doing WLAN firmware
+  /// download) accepts a second attach without a reboot is the one thing
+  /// this can't verify without a real device — everything module-side that
+  /// CAN be gotten right is handled here.
   Future<ShellResult> switchToStock(List<ModuleInfo> modules) {
     final b = StringBuffer();
     for (final m in modules) {
@@ -154,12 +178,23 @@ class ModuleRepository {
     b.writeln('rmmod mac80211 2>/dev/null');
     b.writeln('rmmod cfg80211 2>/dev/null');
     b.writeln("if ! grep -q '^$_vendorWifi ' /proc/modules; then");
+    b.writeln("  if ! grep -q '^cfg80211 ' /proc/modules; then");
+    b.writeln(
+      "    VCFG=\$(find /vendor /vendor_dlkm -name 'cfg80211.ko' 2>/dev/null | head -1)",
+    );
+    b.writeln('    [ -n "\$VCFG" ] && insmod "\$VCFG" 2>&1');
+    b.writeln('  fi');
+    b.writeln("  V=\$(find /vendor /vendor_dlkm -name '$_vendorWifi.ko' 2>/dev/null | head -1)");
+    b.writeln('  [ -n "\$V" ] && insmod "\$V" 2>&1');
     b.writeln('  svc wifi enable 2>/dev/null');
     b.writeln('  sleep 2');
     b.writeln("  if ! grep -q '^$_vendorWifi ' /proc/modules; then");
-    b.writeln("    V=\$(find /vendor /vendor_dlkm -name '$_vendorWifi.ko' 2>/dev/null | head -1)");
-    b.writeln('    [ -n "\$V" ] && insmod "\$V" 2>&1');
+    // One retry cycle: some Qualcomm WLAN HALs need Wi-Fi service bounced
+    // twice before it re-attaches to a freshly re-inserted driver.
+    b.writeln('    svc wifi disable 2>/dev/null');
+    b.writeln('    sleep 1');
     b.writeln('    svc wifi enable 2>/dev/null');
+    b.writeln('    sleep 2');
     b.writeln('  fi');
     b.writeln('fi');
     b.writeln('echo STOCK_CHECK:');
@@ -193,13 +228,16 @@ class ModuleRepository {
         }
       }
       if (module.name == 'cfg80211') {
-        // Loading cfg80211 by hand still needs the vendor teardown first.
+        // Loading cfg80211 by hand still needs the vendor teardown first —
+        // and the vendor's OWN cfg80211.ko has to come out too (same module
+        // name as ours, can't coexist), or this insmod fails with EEXIST.
         final b = StringBuffer();
         b.writeln("if grep -q '^$_vendorWifi ' /proc/modules; then");
         b.writeln('  svc wifi disable 2>/dev/null');
         b.writeln('  sleep 2');
         b.writeln('  rmmod $_vendorWifi 2>/dev/null');
         b.writeln('fi');
+        b.writeln('rmmod cfg80211 2>/dev/null');
         b.writeln("insmod '$kModulesDir/cfg80211.ko' 2>&1");
         return RootShell.run(b.toString());
       }
