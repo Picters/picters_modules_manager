@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'app_controller.dart';
 import 'module_info.dart';
@@ -18,12 +19,51 @@ class OverviewScreen extends StatelessWidget {
     if (!context.mounted) return;
     if (err != null) {
       showError(context, err);
+      if (controller.lastStockRestoreDiagnostics != null) {
+        _showDiagnosticsDialog(context, controller.lastStockRestoreDiagnostics!);
+      }
     } else {
       showInfo(
         context,
         toNetHunter ? 'NetHunter Wi-Fi enabled.' : 'Stock Wi-Fi restored.',
       );
     }
+  }
+
+  void _showDiagnosticsDialog(BuildContext context, String dmesgTail) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Restore diagnostics',
+            style: TextStyle(color: AppColors.white)),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            dmesgTail.isEmpty ? '(no matching dmesg lines)' : dmesgTail,
+            style: const TextStyle(
+              color: AppColors.gray,
+              fontSize: 12.5,
+              fontFamily: 'monospace',
+              height: 1.4,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: dmesgTail));
+              Navigator.of(context).pop();
+            },
+            child: const Text('Copy', style: TextStyle(color: AppColors.white)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close', style: TextStyle(color: AppColors.gray)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadAdapter(BuildContext context, DetectedAdapter a) async {

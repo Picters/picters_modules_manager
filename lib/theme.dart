@@ -44,13 +44,15 @@ ThemeData buildAppTheme() {
   );
 
   return base.copyWith(
+    // White for every switch — red stays reserved for the NetHunter-active
+    // mode badge/glow and errors only, not for ordinary toggles.
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith((s) =>
-          s.contains(WidgetState.selected) ? AppColors.white : AppColors.gray),
+          s.contains(WidgetState.selected) ? AppColors.black : AppColors.gray),
       trackColor: WidgetStateProperty.resolveWith((s) =>
-          s.contains(WidgetState.selected) ? AppColors.red : AppColors.surfaceHigh),
+          s.contains(WidgetState.selected) ? AppColors.white : AppColors.surfaceHigh),
       trackOutlineColor: WidgetStateProperty.resolveWith((s) =>
-          s.contains(WidgetState.selected) ? AppColors.red : AppColors.outline),
+          s.contains(WidgetState.selected) ? AppColors.white : AppColors.outline),
     ),
     textTheme: base.textTheme.apply(
       bodyColor: AppColors.white,

@@ -102,6 +102,10 @@ class AppController extends ChangeNotifier {
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
+  /// The last dmesg tail captured by a failed stock-restore attempt, so the
+  /// UI can offer to show/copy it instead of just "didn't work".
+  String? lastStockRestoreDiagnostics;
+
   /// Returns an error string on failure, or null on success.
   Future<String?> setWifiMode(WifiMode target) async {
     if (wifiBusy) return null;
@@ -113,9 +117,13 @@ class AppController extends ChangeNotifier {
           ? await _repo.switchToNetHunter(state.modules)
           : await _repo.switchToStock(state.modules);
       if (target == WifiMode.stock && !_repo.stockRestored(result)) {
-        error = "Couldn't restore stock Wi-Fi automatically — reboot to restore it.";
+        lastStockRestoreDiagnostics = _repo.stockRestoreDiagnostics(result);
+        error = "Couldn't restore stock Wi-Fi automatically — reboot to restore it. "
+            "Tap here to view diagnostics.";
       } else if (target == WifiMode.nethunter && !result.stdout.contains('OK_NH')) {
         error = 'Failed to load cfg80211: ${result.errorSummary}';
+      } else if (target == WifiMode.stock) {
+        lastStockRestoreDiagnostics = null;
       }
     } on ModulePrecondition catch (e) {
       error = e.message;

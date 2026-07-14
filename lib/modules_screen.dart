@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_controller.dart';
+import 'module_categories.dart';
 import 'module_info.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -29,6 +30,10 @@ class ModulesScreen extends StatelessWidget {
 
         final wifi = state.wifiModules;
         final other = state.otherModules;
+        final byCategory = <ModuleCategory, List<ModuleInfo>>{};
+        for (final m in other) {
+          byCategory.putIfAbsent(categoryOf(m.name), () => []).add(m);
+        }
 
         return RefreshIndicator(
           onRefresh: controller.refresh,
@@ -48,13 +53,16 @@ class ModulesScreen extends StatelessWidget {
                 controller: controller,
                 onToggle: (m, v) => _toggle(context, m, v),
               ),
-              const SizedBox(height: 22),
-              _ModuleGroup(
-                label: 'Other drivers',
-                modules: other,
-                controller: controller,
-                onToggle: (m, v) => _toggle(context, m, v),
-              ),
+              for (final cat in categoryOrder)
+                if (byCategory[cat]?.isNotEmpty ?? false) ...[
+                  const SizedBox(height: 22),
+                  _ModuleGroup(
+                    label: cat.label,
+                    modules: byCategory[cat]!,
+                    controller: controller,
+                    onToggle: (m, v) => _toggle(context, m, v),
+                  ),
+                ],
             ],
           ),
         );

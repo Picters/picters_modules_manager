@@ -154,17 +154,22 @@ class ModuleRepository {
   }
 
   /// Unwind our whole stack and bring the stock vendor Wi-Fi back without a
-  /// reboot if possible. Verifies via /proc/modules rather than assuming.
+  /// reboot if possible. Verifies via /proc/modules AND an actual up
+  /// interface rather than assuming — a loaded qca_cld3 with no working
+  /// firmware still shows up in /proc/modules, which is exactly the failure
+  /// mode reported on real hardware: module present, radio never comes up.
   ///
   /// The vendor's own cfg80211.ko (see switchToNetHunter's doc) still has to
   /// be reloaded BEFORE qca_cld3 — qca_cld3 won't insmod against our cfg80211
   /// (wrong symbol versions). It's a vendor file we never touched, so it
   /// should still be sitting wherever it was at boot; this searches for it
   /// rather than guessing a fixed path, same as it already did for qca_cld3.
-  /// Whether cnss2 (the platform driver actually doing WLAN firmware
-  /// download) accepts a second attach without a reboot is the one thing
-  /// this can't verify without a real device — everything module-side that
-  /// CAN be gotten right is handled here.
+  ///
+  /// If the module reloads but no Wi-Fi netdev comes up (still-broken
+  /// firmware attach), this escalates to a PCI unbind/bind of the WLAN
+  /// device — a full re-probe of the platform driver (cnss2, on Qualcomm),
+  /// much closer to what boot actually does than a plain module reload.
+  /// Still no guarantee — see project memory for what's verified vs. not.
   Future<ShellResult> switchToStock(List<ModuleInfo> modules) {
     final b = StringBuffer();
     for (final m in modules) {
@@ -177,36 +182,89 @@ class ModuleRepository {
     }
     b.writeln('rmmod mac80211 2>/dev/null');
     b.writeln('rmmod cfg80211 2>/dev/null');
-    b.writeln("if ! grep -q '^$_vendorWifi ' /proc/modules; then");
-    b.writeln("  if ! grep -q '^cfg80211 ' /proc/modules; then");
+    b.writeln('');
+    b.writeln('wlan_up() {');
+    b.writeln('  for n in /sys/class/net/*/; do');
+    b.writeln('    nm=\$(basename "\$n")');
+    b.writeln('    case "\$nm" in wlan*|wlp*)');
+    b.writeln('      [ "\$(cat "\${n}operstate" 2>/dev/null)" = "up" ] && return 0');
+    b.writeln('      ;;');
+    b.writeln('    esac');
+    b.writeln('  done');
+    b.writeln('  return 1');
+    b.writeln('}');
+    b.writeln('reload_vendor() {');
+    b.writeln("  grep -q '^cfg80211 ' /proc/modules && return 0");
     b.writeln(
-      "    VCFG=\$(find /vendor /vendor_dlkm -name 'cfg80211.ko' 2>/dev/null | head -1)",
+      "  VCFG=\$(find /vendor /vendor_dlkm -name 'cfg80211.ko' 2>/dev/null | head -1)",
     );
-    b.writeln('    [ -n "\$VCFG" ] && insmod "\$VCFG" 2>&1');
-    b.writeln('  fi');
-    b.writeln("  V=\$(find /vendor /vendor_dlkm -name '$_vendorWifi.ko' 2>/dev/null | head -1)");
+    b.writeln('  [ -n "\$VCFG" ] && insmod "\$VCFG" 2>&1');
+    b.writeln(
+      "  V=\$(find /vendor /vendor_dlkm -name '$_vendorWifi.ko' 2>/dev/null | head -1)",
+    );
     b.writeln('  [ -n "\$V" ] && insmod "\$V" 2>&1');
+    b.writeln('}');
+    b.writeln("if ! grep -q '^$_vendorWifi ' /proc/modules; then reload_vendor; fi");
+    b.writeln('svc wifi enable 2>/dev/null');
+    b.writeln('sleep 2');
+    b.writeln('if ! wlan_up; then');
+    // Some Qualcomm WLAN HALs need the Wi-Fi service bounced twice before
+    // they re-attach to a freshly re-inserted driver.
+    b.writeln('  svc wifi disable 2>/dev/null');
+    b.writeln('  sleep 1');
     b.writeln('  svc wifi enable 2>/dev/null');
     b.writeln('  sleep 2');
-    b.writeln("  if ! grep -q '^$_vendorWifi ' /proc/modules; then");
-    // One retry cycle: some Qualcomm WLAN HALs need Wi-Fi service bounced
-    // twice before it re-attaches to a freshly re-inserted driver.
-    b.writeln('    svc wifi disable 2>/dev/null');
-    b.writeln('    sleep 1');
-    b.writeln('    svc wifi enable 2>/dev/null');
-    b.writeln('    sleep 2');
-    b.writeln('  fi');
+    b.writeln('fi');
+    b.writeln('if ! wlan_up; then');
+    // Module loaded but firmware/radio never came up — force a full PCI
+    // re-probe of the WLAN device instead of just the driver module.
+    b.writeln('  for d in /sys/bus/pci/devices/*/; do');
+    b.writeln('    case "\$(cat "\${d}class" 2>/dev/null)" in 0x0280*)');
+    b.writeln('      WNAME=\$(basename "\$d")');
+    b.writeln('      WDRV=\$(basename "\$(readlink -f "\${d}driver" 2>/dev/null)")');
+    b.writeln('      if [ -n "\$WDRV" ]; then');
+    b.writeln('        echo "\$WNAME" > "/sys/bus/pci/drivers/\$WDRV/unbind" 2>/dev/null');
+    b.writeln('        sleep 1');
+    b.writeln('        echo "\$WNAME" > "/sys/bus/pci/drivers/\$WDRV/bind" 2>/dev/null');
+    b.writeln('        sleep 3');
+    b.writeln('      fi');
+    b.writeln('      ;;');
+    b.writeln('    esac');
+    b.writeln('  done');
+    b.writeln('  svc wifi enable 2>/dev/null');
+    b.writeln('  sleep 2');
     b.writeln('fi');
     b.writeln('echo STOCK_CHECK:');
     b.writeln("grep -c '^$_vendorWifi ' /proc/modules");
-    return RootShell.run(b.toString());
+    b.writeln('wlan_up && echo WLAN_UP:1 || echo WLAN_UP:0');
+    b.writeln('echo DMESG_TAIL:');
+    b.writeln("dmesg 2>/dev/null | grep -iE 'wlan|cnss|qca|cld3' | tail -n 15");
+    return RootShell.run(b.toString(), timeout: const Duration(seconds: 45));
   }
 
+  /// True only if the vendor module is loaded AND a wlan interface is
+  /// actually administratively up — not just "module present".
   bool stockRestored(ShellResult r) {
-    final i = r.stdout.indexOf('STOCK_CHECK:');
-    if (i < 0) return false;
-    final tail = r.stdout.substring(i + 'STOCK_CHECK:'.length).trim();
-    return (int.tryParse(tail.split('\n').first.trim()) ?? 0) > 0;
+    final moduleOk = _markerCount(r.stdout, 'STOCK_CHECK:') > 0;
+    final interfaceOk = r.stdout.contains('WLAN_UP:1');
+    return moduleOk && interfaceOk;
+  }
+
+  /// Last ~15 dmesg lines mentioning wlan/cnss/qca/cld3, captured by
+  /// [switchToStock] — for surfacing to the user or attaching to a bug
+  /// report when the automatic restore doesn't work.
+  String? stockRestoreDiagnostics(ShellResult r) {
+    final i = r.stdout.indexOf('DMESG_TAIL:');
+    if (i < 0) return null;
+    final tail = r.stdout.substring(i + 'DMESG_TAIL:'.length).trim();
+    return tail.isEmpty ? null : tail;
+  }
+
+  int _markerCount(String stdout, String marker) {
+    final i = stdout.indexOf(marker);
+    if (i < 0) return 0;
+    final rest = stdout.substring(i + marker.length).trim();
+    return int.tryParse(rest.split('\n').first.trim()) ?? 0;
   }
 
   // ── Individual module toggle (the deep-config tab) ──────────────────────
