@@ -21,7 +21,7 @@ class OverviewScreen extends StatelessWidget {
     } else {
       showInfo(
         context,
-        toNetHunter ? 'NetHunter Wi-Fi включён.' : 'Стоковый Wi-Fi восстановлен.',
+        toNetHunter ? 'NetHunter Wi-Fi enabled.' : 'Stock Wi-Fi restored.',
       );
     }
   }
@@ -52,7 +52,7 @@ class OverviewScreen extends StatelessWidget {
             ),
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
             children: [
-              const ScreenTitle('Picters Kernel Manager', subtitle: 'Обзор'),
+              const ScreenTitle('Picters Kernel Manager', subtitle: 'Overview'),
               const SizedBox(height: 8),
               _WifiHeroCard(
                 mode: state.wifiMode,
@@ -64,7 +64,7 @@ class OverviewScreen extends StatelessWidget {
                 children: [
                   const Icon(Icons.usb, color: AppColors.gray, size: 20),
                   const SizedBox(width: 8),
-                  Text('Подключённые адаптеры',
+                  Text('Plugged-in adapters',
                       style: sectionLabelStyle),
                 ],
               ),
@@ -75,8 +75,8 @@ class OverviewScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(18),
                     child: Text(
                       unknown > 0
-                          ? 'Wi-Fi адаптеры не найдены ($unknown других USB-устройств).'
-                          : 'Воткните USB-адаптер — он появится здесь.',
+                          ? 'No Wi-Fi adapter found ($unknown other USB device${unknown == 1 ? '' : 's'}).'
+                          : 'Plug in a USB adapter — it\'ll show up here.',
                       style: const TextStyle(color: AppColors.gray, fontSize: 15),
                     ),
                   ),
@@ -122,18 +122,18 @@ class _WifiHeroCard extends StatelessWidget {
     final nh = mode == WifiMode.nethunter;
     final (title, subtitle, badge) = switch (mode) {
       WifiMode.stock => (
-          'Стоковый Wi-Fi',
-          'Работает встроенный Wi-Fi телефона. Инъекция выключена.',
+          'Stock Wi-Fi',
+          'The phone\'s built-in Wi-Fi is running. Injection is off.',
           'STOCK',
         ),
       WifiMode.nethunter => (
           'NetHunter Wi-Fi',
-          'Загружено наше ядро cfg80211. Можно использовать адаптеры для инъекции.',
+          'Our kernel cfg80211 is loaded. Injection adapters can be used now.',
           'NETHUNTER',
         ),
       WifiMode.off => (
-          'Wi-Fi не активен',
-          'Ни стоковый, ни наш стек не загружены. Включите NetHunter.',
+          'Wi-Fi is inactive',
+          'Neither stock nor our stack is loaded. Turn on NetHunter.',
           'OFF',
         ),
     };
@@ -273,7 +273,7 @@ class _AdapterRow extends StatelessWidget {
         children: const [
           Icon(Icons.bolt, color: AppColors.red, size: 18),
           SizedBox(width: 4),
-          Text('активен', style: TextStyle(color: AppColors.white, fontSize: 14)),
+          Text('active', style: TextStyle(color: AppColors.white, fontSize: 14)),
         ],
       );
     } else {
@@ -284,7 +284,7 @@ class _AdapterRow extends StatelessWidget {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
         onPressed: onLoad,
-        child: const Text('Загрузить'),
+        child: const Text('Load'),
       );
     }
 

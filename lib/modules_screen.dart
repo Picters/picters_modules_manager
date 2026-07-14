@@ -40,17 +40,17 @@ class ModulesScreen extends StatelessWidget {
             ),
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
             children: [
-              const ScreenTitle('Модули', subtitle: 'Глубокая настройка'),
+              const ScreenTitle('Modules', subtitle: 'Deep configuration'),
               _ModuleGroup(
-                label: 'Wi-Fi стек',
-                hint: 'cfg80211/mac80211 обычно переключаются на главном экране.',
+                label: 'Wi-Fi stack',
+                hint: 'cfg80211/mac80211 are usually switched from the Overview screen.',
                 modules: wifi,
                 controller: controller,
                 onToggle: (m, v) => _toggle(context, m, v),
               ),
               const SizedBox(height: 22),
               _ModuleGroup(
-                label: 'Другие драйверы',
+                label: 'Other drivers',
                 modules: other,
                 controller: controller,
                 onToggle: (m, v) => _toggle(context, m, v),
@@ -182,7 +182,7 @@ class _EmptyModules extends StatelessWidget {
               size: 52, color: AppColors.grayDim),
           const SizedBox(height: 18),
           const Text(
-            'OOT-модули не найдены',
+            'No OOT modules found',
             textAlign: TextAlign.center,
             style: TextStyle(
                 color: AppColors.white, fontSize: 19, fontWeight: FontWeight.w600),
@@ -191,8 +191,8 @@ class _EmptyModules extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 40),
             child: Text(
-              'Сначала установите zip с OOT-модулями через ваш KernelSU/Magisk '
-              'менеджер, затем откройте приложение заново.',
+              'Install the OOT modules zip from your KernelSU or Magisk '
+              'manager first, then reopen the app.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.gray, fontSize: 14, height: 1.4),
             ),

@@ -43,9 +43,5 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        <!-- So getLaunchIntentForPackage() can actually see these on Android 11+
-             package-visibility rules — see MainActivity.kt's openRootManager(). -->
-        <package android:name="com.resukisu.resukisu"/>
-        <package android:name="me.weishu.kernelsu"/>
     </queries>
 </manifest>

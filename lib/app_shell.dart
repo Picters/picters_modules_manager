@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'app_controller.dart';
 import 'module_repository.dart';
 import 'modules_screen.dart';
-import 'native_bridge.dart';
 import 'overview_screen.dart';
 import 'theme.dart';
 
@@ -51,11 +50,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             case RootStatus.checking:
               return const _CenterGlyph(
                 icon: Icons.hourglass_empty,
-                title: 'Проверка root-доступа…',
+                title: 'Checking root access…',
                 spinner: true,
               );
             case RootStatus.denied:
-              return _RootDenied(controller: _controller);
+              return const _RootDenied();
             case RootStatus.granted:
               return SafeArea(
                 bottom: false,
@@ -118,14 +117,14 @@ class _FrostedNavBar extends StatelessWidget {
               _NavItem(
                 icon: Icons.shield_moon_outlined,
                 activeIcon: Icons.shield_moon,
-                label: 'Обзор',
+                label: 'Overview',
                 selected: index == 0,
                 onTap: () => onChanged(0),
               ),
               _NavItem(
                 icon: Icons.tune_outlined,
                 activeIcon: Icons.tune,
-                label: 'Модули',
+                label: 'Modules',
                 selected: index == 1,
                 onTap: () => onChanged(1),
               ),
@@ -185,8 +184,7 @@ class _NavItem extends StatelessWidget {
 }
 
 class _RootDenied extends StatelessWidget {
-  const _RootDenied({required this.controller});
-  final AppController controller;
+  const _RootDenied();
 
   @override
   Widget build(BuildContext context) {
@@ -199,7 +197,7 @@ class _RootDenied extends StatelessWidget {
             const Icon(Icons.lock_outline, size: 56, color: AppColors.red),
             const SizedBox(height: 20),
             const Text(
-              'Нужен root',
+              'Root required',
               style: TextStyle(
                 color: AppColors.white,
                 fontSize: 24,
@@ -208,42 +206,10 @@ class _RootDenied extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             const Text(
-              'Один раз выдайте root приложению во вкладке Superuser вашего '
-              'KernelSU/Magisk менеджера — как любому root-приложению. '
-              'Дальше спрашивать не будет.',
+              'Grant root to Picters Kernel Manager in your KernelSU or '
+              'Magisk manager app.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.gray, fontSize: 15, height: 1.4),
-            ),
-            const SizedBox(height: 28),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.red,
-                foregroundColor: AppColors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-              ),
-              onPressed: () async {
-                final pkg = await NativeBridge.openRootManager();
-                if (!context.mounted) return;
-                if (pkg != null) {
-                  showInfo(context, 'Открыт $pkg — выдайте root и вернитесь.');
-                } else {
-                  showError(context,
-                      'Не нашёл менеджер автоматически — откройте его вручную (Superuser).');
-                }
-              },
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Открыть менеджер'),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.white,
-                side: const BorderSide(color: AppColors.outline),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-              ),
-              onPressed: controller.retry,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Повторить'),
             ),
           ],
         ),

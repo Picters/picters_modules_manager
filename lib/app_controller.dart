@@ -37,25 +37,46 @@ class AppController extends ChangeNotifier {
     if (ok) {
       await _pollOnce(force: true);
       _startTimer();
+    } else {
+      _startRootRecheckTimer();
     }
   }
 
-  Future<void> retry() => init();
-
   void setForeground(bool value) {
     _foreground = value;
-    if (value && rootStatus == RootStatus.granted) {
+    if (!value) {
+      _timer?.cancel();
+      _timer = null;
+      return;
+    }
+    if (rootStatus == RootStatus.granted) {
       _startTimer();
       _pollOnce(force: true);
     } else {
-      _timer?.cancel();
-      _timer = null;
+      _startRootRecheckTimer();
     }
   }
 
   void _startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _pollOnce());
+  }
+
+  /// While root hasn't been granted yet there's nothing to show a button for
+  /// — just keep quietly checking so the app transitions on its own the
+  /// moment the user grants it in their manager and comes back.
+  void _startRootRecheckTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (!_foreground) return;
+      final ok = await RootShell.checkRoot();
+      if (ok) {
+        rootStatus = RootStatus.granted;
+        notifyListeners();
+        await _pollOnce(force: true);
+        _startTimer();
+      }
+    });
   }
 
   Future<void> _pollOnce({bool force = false}) async {
@@ -92,14 +113,14 @@ class AppController extends ChangeNotifier {
           ? await _repo.switchToNetHunter(state.modules)
           : await _repo.switchToStock(state.modules);
       if (target == WifiMode.stock && !_repo.stockRestored(result)) {
-        error = 'Не удалось вернуть стоковый Wi-Fi автоматически — перезагрузите телефон.';
+        error = "Couldn't restore stock Wi-Fi automatically — reboot to restore it.";
       } else if (target == WifiMode.nethunter && !result.stdout.contains('OK_NH')) {
-        error = 'Не удалось загрузить cfg80211: ${result.errorSummary}';
+        error = 'Failed to load cfg80211: ${result.errorSummary}';
       }
     } on ModulePrecondition catch (e) {
       error = e.message;
     } catch (e) {
-      error = 'Ошибка: $e';
+      error = 'Error: $e';
     } finally {
       wifiBusy = false;
       await _pollOnce(force: true);
@@ -122,13 +143,13 @@ class AppController extends ChangeNotifier {
         orElse: () => module,
       );
       if (now.loaded != want) {
-        error = '${want ? 'Не загрузился' : 'Не выгрузился'} ${module.name}: '
+        error = '${want ? 'Failed to load' : 'Failed to unload'} ${module.name}: '
             '${result.errorSummary}';
       }
     } on ModulePrecondition catch (e) {
       error = e.message;
     } catch (e) {
-      error = 'Ошибка: $e';
+      error = 'Error: $e';
     } finally {
       moduleBusy.remove(module.name);
       notifyListeners();
@@ -140,7 +161,7 @@ class AppController extends ChangeNotifier {
     final driver = adapter.match?.driver;
     if (driver == null) return null;
     if (state.wifiMode != WifiMode.nethunter) {
-      return 'Сначала включите NetHunter Wi-Fi на главном экране.';
+      return 'Enable NetHunter Wi-Fi on the Overview screen first.';
     }
     ModuleInfo? mod;
     for (final m in state.modules) {
@@ -149,7 +170,7 @@ class AppController extends ChangeNotifier {
         break;
       }
     }
-    if (mod == null) return 'Драйвер $driver не установлен в модуле.';
+    if (mod == null) return "Driver $driver isn't staged in this module.";
     return toggleModule(mod, true);
   }
 
