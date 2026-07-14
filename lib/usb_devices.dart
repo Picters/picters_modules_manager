@@ -1,5 +1,3 @@
-import 'root_shell.dart';
-
 /// A USB device the kernel currently enumerates, read straight from sysfs.
 class UsbDevice {
   const UsbDevice({
@@ -138,47 +136,44 @@ class DetectedAdapter {
   bool get recognized => match != null;
 }
 
-class UsbScanner {
-  static const String _marker = '___PMM_USB___';
+/// Shell fragment that lists every USB device's VID:PID/manufacturer/product,
+/// one per line, each prefixed with [usbMarker]. Root-only because sysfs
+/// listing isn't world-readable under some SELinux policies. Folded into the
+/// single combined scan in ModuleRepository so a 1s poll is one `su` round-trip.
+const String usbMarker = '___PMM_USB___';
 
-  /// Enumerates /sys/bus/usb/devices and matches each device's VID:PID
-  /// against [kKnownAdapters]. Root-only because sysfs directory listing
-  /// under some SELinux policies isn't world-readable — reuses the same
-  /// stdin-piped su as ModuleRepository/RootShell.
-  Future<List<DetectedAdapter>> scan() async {
-    final r = await RootShell.run(
-      'for d in /sys/bus/usb/devices/*/; do\n'
-      '  if [ -f "\${d}idVendor" ] && [ -f "\${d}idProduct" ]; then\n'
-      '    echo "$_marker\$(cat "\${d}idVendor" 2>/dev/null)|\$(cat "\${d}idProduct" 2>/dev/null)|\$(cat "\${d}manufacturer" 2>/dev/null)|\$(cat "\${d}product" 2>/dev/null)"\n'
-      '  fi\n'
-      'done\n',
+const String usbScanFragment =
+    'for d in /sys/bus/usb/devices/*/; do '
+    'if [ -f "\${d}idVendor" ] && [ -f "\${d}idProduct" ]; then '
+    'echo "$usbMarker\$(cat "\${d}idVendor" 2>/dev/null)|\$(cat "\${d}idProduct" 2>/dev/null)|\$(cat "\${d}manufacturer" 2>/dev/null)|\$(cat "\${d}product" 2>/dev/null)"; '
+    'fi; done';
+
+/// Parses the lines produced by [usbScanFragment] (already split on '\n') into
+/// matched [DetectedAdapter]s.
+List<DetectedAdapter> parseUsbLines(Iterable<String> lines) {
+  final out = <DetectedAdapter>[];
+  for (final line in lines) {
+    final idx = line.indexOf(usbMarker);
+    if (idx < 0) continue;
+    final fields = line.substring(idx + usbMarker.length).split('|');
+    if (fields.length < 2) continue;
+    final vid = fields[0].trim().toLowerCase();
+    final pid = fields[1].trim().toLowerCase();
+    if (vid.isEmpty || pid.isEmpty) continue;
+    final device = UsbDevice(
+      vendorId: vid,
+      productId: pid,
+      manufacturer: fields.length > 2 ? fields[2].trim() : '',
+      product: fields.length > 3 ? fields[3].trim() : '',
     );
-
-    final devices = <UsbDevice>[];
-    for (final line in r.stdout.split('\n')) {
-      if (!line.startsWith(_marker)) continue;
-      final fields = line.substring(_marker.length).split('|');
-      if (fields.length < 2) continue;
-      final vid = fields[0].trim().toLowerCase();
-      final pid = fields[1].trim().toLowerCase();
-      if (vid.isEmpty || pid.isEmpty) continue;
-      devices.add(UsbDevice(
-        vendorId: vid,
-        productId: pid,
-        manufacturer: fields.length > 2 ? fields[2].trim() : '',
-        product: fields.length > 3 ? fields[3].trim() : '',
-      ));
-    }
-
-    return devices.map((d) {
-      KnownAdapter? match;
-      for (final k in kKnownAdapters) {
-        if (k.vendorId == d.vendorId && k.productId == d.productId) {
-          match = k;
-          break;
-        }
+    KnownAdapter? match;
+    for (final k in kKnownAdapters) {
+      if (k.vendorId == vid && k.productId == pid) {
+        match = k;
+        break;
       }
-      return DetectedAdapter(device: d, match: match);
-    }).toList();
+    }
+    out.add(DetectedAdapter(device: device, match: match));
   }
+  return out;
 }

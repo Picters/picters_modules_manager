@@ -15,7 +15,7 @@
             android:exported="true"
             android:enabled="true"
             android:icon="@mipmap/ic_launcher"
-            android:label="Picters Modules Manager (debug)">
+            android:label="Picters Kernel Manager (debug)">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
