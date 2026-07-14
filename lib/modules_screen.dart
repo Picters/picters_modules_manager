@@ -14,7 +14,12 @@ class ModulesScreen extends StatelessWidget {
   Future<void> _toggle(BuildContext context, ModuleInfo m, bool v) async {
     final err = await controller.toggleModule(m, v);
     if (!context.mounted) return;
-    if (err != null) showError(context, err);
+    if (err != null) {
+      showError(context, err);
+      if (controller.lastModuleDiagnostics != null) {
+        showDiagnosticsDialog(context, controller.lastModuleDiagnostics!);
+      }
+    }
   }
 
   @override

@@ -1,6 +1,45 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'theme.dart';
+
+/// A copyable dialog for a captured dmesg tail — shared by any failure path
+/// that surfaces [ModuleRepository]'s diagnostics (Wi-Fi mode switch, plain
+/// module toggle) instead of just an opaque "didn't work" message.
+void showDiagnosticsDialog(BuildContext context, String dmesgTail) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Text('Diagnostics', style: TextStyle(color: AppColors.white)),
+      content: SingleChildScrollView(
+        child: SelectableText(
+          dmesgTail.isEmpty ? '(no matching dmesg lines)' : dmesgTail,
+          style: const TextStyle(
+            color: AppColors.gray,
+            fontSize: 12.5,
+            fontFamily: 'monospace',
+            height: 1.4,
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: dmesgTail));
+            Navigator.of(context).pop();
+          },
+          child: const Text('Copy', style: TextStyle(color: AppColors.white)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close', style: TextStyle(color: AppColors.gray)),
+        ),
+      ],
+    ),
+  );
+}
 
 const TextStyle sectionLabelStyle = TextStyle(
   color: AppColors.gray,

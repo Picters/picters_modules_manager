@@ -136,6 +136,10 @@ class AppController extends ChangeNotifier {
     return error;
   }
 
+  /// The last dmesg tail captured by a failed module load/unload — same idea
+  /// as [lastStockRestoreDiagnostics], for the per-module toggle path.
+  String? lastModuleDiagnostics;
+
   Future<String?> toggleModule(ModuleInfo module, bool want) async {
     if (moduleBusy.contains(module.name)) return null;
     moduleBusy.add(module.name);
@@ -151,8 +155,11 @@ class AppController extends ChangeNotifier {
         orElse: () => module,
       );
       if (now.loaded != want) {
+        lastModuleDiagnostics = _repo.loadDiagnostics(result);
         error = '${want ? 'Failed to load' : 'Failed to unload'} ${module.name}: '
-            '${result.errorSummary}';
+            '${_repo.loadErrorSummary(result)}';
+      } else {
+        lastModuleDiagnostics = null;
       }
     } on ModulePrecondition catch (e) {
       error = e.message;

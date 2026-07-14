@@ -299,8 +299,58 @@ class ModuleRepository {
         b.writeln("insmod '$kModulesDir/cfg80211.ko' 2>&1");
         return RootShell.run(b.toString());
       }
-      return RootShell.run("insmod '$kModulesDir/${module.name}.ko' 2>&1");
+      return RootShell.run(_insmodWithRetryScript(module));
     }
     return RootShell.run("rmmod '${module.krName}' 2>&1");
+  }
+
+  /// insmod, with a couple of retries a second apart, plus a module-specific
+  /// dmesg tail always appended. Fixes a real race: right after cfg80211/
+  /// mac80211 come up they're already visible in /proc/modules (so the
+  /// precondition check above passes), but the wireless core can need a
+  /// moment longer before it's actually ready to accept a new adapter
+  /// registering against it — a driver probing too early gets "Invalid
+  /// argument" from insmod even though nothing is really wrong; the exact
+  /// same insmod succeeds a second later. Retrying here means the user
+  /// doesn't have to notice that and retry by hand (as happened before this
+  /// fix — toggling NetHunter mode off/on again just gave it more time to
+  /// settle before the next attempt).
+  String _insmodWithRetryScript(ModuleInfo module) {
+    final path = "$kModulesDir/${module.name}.ko";
+    final b = StringBuffer();
+    b.writeln('OUT=""');
+    b.writeln('i=0');
+    b.writeln('while [ "\$i" -lt 3 ]; do');
+    b.writeln("  OUT=\$(insmod '$path' 2>&1)");
+    b.writeln("  grep -q '^${module.krName} ' /proc/modules && break");
+    b.writeln('  i=\$((i + 1))');
+    b.writeln('  sleep 1');
+    b.writeln('done');
+    b.writeln('echo "\$OUT"');
+    b.writeln('echo DMESG_TAIL:');
+    b.writeln("dmesg 2>/dev/null | grep -iE '${module.krName}' | tail -n 10");
+    return b.toString();
+  }
+
+  /// Same DMESG_TAIL marker as [stockRestoreDiagnostics], for the plain
+  /// insmod/rmmod path — reused by the UI when a module load/unload doesn't
+  /// end up in the state the user asked for.
+  String? loadDiagnostics(ShellResult r) {
+    final i = r.stdout.indexOf('DMESG_TAIL:');
+    if (i < 0) return null;
+    final tail = r.stdout.substring(i + 'DMESG_TAIL:'.length).trim();
+    return tail.isEmpty ? null : tail;
+  }
+
+  /// The insmod/rmmod output itself, excluding the DMESG_TAIL section that
+  /// [_insmodWithRetryScript] appends — ShellResult.errorSummary would
+  /// otherwise report the last dmesg line instead of the actual command
+  /// output when a script has diagnostics tacked on.
+  String loadErrorSummary(ShellResult r) {
+    final i = r.stdout.indexOf('DMESG_TAIL:');
+    final head = i >= 0 ? r.stdout.substring(0, i) : r.stdout;
+    final lines =
+        head.trim().split('\n').where((l) => l.trim().isNotEmpty).toList();
+    return lines.isEmpty ? 'exit code ${r.exitCode}' : lines.last;
   }
 }
