@@ -145,7 +145,20 @@ class ModuleRepository {
     // Whatever cfg80211 is loaded right now (vendor's, almost certainly) has
     // to go before ours can take its place — same module name, can't coexist.
     b.writeln('rmmod cfg80211 2>/dev/null');
-    b.writeln("insmod '$kModulesDir/cfg80211.ko' 2>&1");
+    // Same transient-race retry as _insmodWithRetryScript: right after the
+    // vendor stack tears down, the wireless core can still be mid-teardown
+    // for a moment, so the very next insmod of OUR cfg80211 can fail even
+    // though nothing is really wrong — the exact same insmod succeeds a
+    // second later. This was previously single-shot here, which is why the
+    // very first tap of "NetHunter Wi-Fi" after a vendor teardown could
+    // silently fail to switch while a second tap worked.
+    b.writeln('i=0');
+    b.writeln('while [ "\$i" -lt 3 ]; do');
+    b.writeln("  insmod '$kModulesDir/cfg80211.ko' 2>&1");
+    b.writeln("  grep -q '^cfg80211 ' /proc/modules && break");
+    b.writeln('  i=\$((i + 1))');
+    b.writeln('  sleep 1');
+    b.writeln('done');
     if (modules.any((m) => m.name == 'mac80211')) {
       b.writeln("grep -q '^mac80211 ' /proc/modules || insmod '$kModulesDir/mac80211.ko' 2>&1");
     }
@@ -204,7 +217,7 @@ class ModuleRepository {
     );
     b.writeln('  [ -n "\$V" ] && insmod "\$V" 2>&1');
     b.writeln('}');
-    b.writeln("if ! grep -q '^$_vendorWifi ' /proc/modules; then reload_vendor; fi");
+    b.writeln("if ! grep -q '^$_vendorWifi ' /proc/modules; then reload_vendor; sleep 2; fi");
     b.writeln('svc wifi enable 2>/dev/null');
     b.writeln('sleep 2');
     b.writeln('if ! wlan_up; then');
@@ -217,22 +230,31 @@ class ModuleRepository {
     b.writeln('fi');
     b.writeln('if ! wlan_up; then');
     // Module loaded but firmware/radio never came up — force a full PCI
-    // re-probe of the WLAN device instead of just the driver module.
-    b.writeln('  for d in /sys/bus/pci/devices/*/; do');
-    b.writeln('    case "\$(cat "\${d}class" 2>/dev/null)" in 0x0280*)');
-    b.writeln('      WNAME=\$(basename "\$d")');
-    b.writeln('      WDRV=\$(basename "\$(readlink -f "\${d}driver" 2>/dev/null)")');
-    b.writeln('      if [ -n "\$WDRV" ]; then');
-    b.writeln('        echo "\$WNAME" > "/sys/bus/pci/drivers/\$WDRV/unbind" 2>/dev/null');
-    b.writeln('        sleep 1');
-    b.writeln('        echo "\$WNAME" > "/sys/bus/pci/drivers/\$WDRV/bind" 2>/dev/null');
-    b.writeln('        sleep 3');
-    b.writeln('      fi');
-    b.writeln('      ;;');
-    b.writeln('    esac');
+    // re-probe of the WLAN device instead of just the driver module. A
+    // single unbind/bind pass isn't always enough: on real hardware the
+    // config space can still read back a bogus device ID (0xffff) if the
+    // bus hasn't finished settling after unbind, which fails the re-probe
+    // outright — so retry the whole unbind/bind cycle with a longer bind
+    // settle before giving up, and stop as soon as the interface is up.
+    b.writeln('  pci_reprobe=0');
+    b.writeln('  while [ "\$pci_reprobe" -lt 2 ] && ! wlan_up; do');
+    b.writeln('    for d in /sys/bus/pci/devices/*/; do');
+    b.writeln('      case "\$(cat "\${d}class" 2>/dev/null)" in 0x0280*)');
+    b.writeln('        WNAME=\$(basename "\$d")');
+    b.writeln('        WDRV=\$(basename "\$(readlink -f "\${d}driver" 2>/dev/null)")');
+    b.writeln('        if [ -n "\$WDRV" ]; then');
+    b.writeln('          echo "\$WNAME" > "/sys/bus/pci/drivers/\$WDRV/unbind" 2>/dev/null');
+    b.writeln('          sleep 2');
+    b.writeln('          echo "\$WNAME" > "/sys/bus/pci/drivers/\$WDRV/bind" 2>/dev/null');
+    b.writeln('          sleep 5');
+    b.writeln('        fi');
+    b.writeln('        ;;');
+    b.writeln('      esac');
+    b.writeln('    done');
+    b.writeln('    svc wifi enable 2>/dev/null');
+    b.writeln('    sleep 2');
+    b.writeln('    pci_reprobe=\$((pci_reprobe + 1))');
     b.writeln('  done');
-    b.writeln('  svc wifi enable 2>/dev/null');
-    b.writeln('  sleep 2');
     b.writeln('fi');
     b.writeln('echo STOCK_CHECK:');
     b.writeln("grep -c '^$_vendorWifi ' /proc/modules");

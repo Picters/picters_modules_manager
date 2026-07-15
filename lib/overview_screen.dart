@@ -131,17 +131,17 @@ class _WifiHeroCard extends StatelessWidget {
     final (title, subtitle, badge) = switch (mode) {
       WifiMode.stock => (
           'Stock Wi-Fi',
-          'The phone\'s built-in Wi-Fi is running. Injection is off.',
+          'The phone\'s built-in Wi-Fi is running.',
           'STOCK',
         ),
       WifiMode.nethunter => (
           'NetHunter Wi-Fi',
-          'Our kernel cfg80211 is loaded. Injection adapters can be used now.',
-          'NETHUNTER',
+          'Our kernel cfg80211 is loaded.',
+          'LOADED',
         ),
       WifiMode.off => (
           'Wi-Fi is inactive',
-          'Neither stock nor our stack is loaded. Turn on NetHunter.',
+          'Neither stock nor our stack is loaded. Turn on CFG80211.',
           'OFF',
         ),
     };
