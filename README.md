@@ -24,19 +24,3 @@ flutter pub get
 flutter build apk --release   # hidden app shipped in the module
 flutter build apk --debug     # adds a launcher icon for sideloading
 ```
-
-## Source layout
-
-| File | Role |
-|------|------|
-| `main.dart`, `app_shell.dart` | entry, theme, two-tab shell, root states, ⋮ menu |
-| `overview_screen.dart` | Wi-Fi mode hero card + adapters |
-| `modules_screen.dart` | all `.ko`, grouped + searchable |
-| `app_controller.dart` | single source of truth: 1s poll, root status, actions |
-| `module_repository.dart` | combined scan + mode-switch / toggle scripts |
-| `module_info.dart`, `module_categories.dart` | models + driver grouping/descriptions |
-| `usb_devices.dart` | VID:PID → driver table + sysfs parsing |
-| `root_shell.dart` | persistent `su` session (marker-framed commands) |
-| `update_checker.dart` | GitHub Releases self-update |
-| `native_bridge.dart` + `MainActivity.kt` | open root manager, pin shortcut |
-| `theme.dart`, `widgets.dart` | palette + shared widgets |
