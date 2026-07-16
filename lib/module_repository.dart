@@ -144,25 +144,45 @@ class ModuleRepository {
     b.writeln('fi');
     // Whatever cfg80211 is loaded right now (vendor's, almost certainly) has
     // to go before ours can take its place — same module name, can't coexist.
+    // mac80211 registers itself as a cfg80211 client at insmod time, so
+    // cfg80211 stays EBUSY (rmmod fails) as long as ANY mac80211 — vendor's
+    // or ours — is still resident, even if mac80211 itself has zero
+    // dependents right now. Confirmed on-device: without this, rmmod
+    // cfg80211 exits 1 every time, our insmod then fails "File exists"
+    // against the still-resident (vendor) cfg80211, and the old grep-based
+    // success check couldn't tell "a cfg80211 is loaded" from "OUR cfg80211
+    // is loaded" — so it reported OK_NH while nothing had actually switched,
+    // and mac80211/the adapter drivers loaded against the wrong cfg80211
+    // next, which is what threw "disagrees about version of symbol".
+    b.writeln('rmmod mac80211 2>/dev/null');
     b.writeln('rmmod cfg80211 2>/dev/null');
-    // Same transient-race retry as _insmodWithRetryScript: right after the
-    // vendor stack tears down, the wireless core can still be mid-teardown
-    // for a moment, so the very next insmod of OUR cfg80211 can fail even
-    // though nothing is really wrong — the exact same insmod succeeds a
-    // second later. This was previously single-shot here, which is why the
-    // very first tap of "NetHunter Wi-Fi" after a vendor teardown could
-    // silently fail to switch while a second tap worked.
+    // insmod's own exit status is the only reliable success signal — unlike
+    // grepping /proc/modules for the name "cfg80211", it can't be fooled by
+    // a stale module of the same name still being resident. Retry a few
+    // times a second apart for the transient teardown race, re-attempting
+    // the rmmods each time in case the previous insmod's "File exists"
+    // failure left something to clear out.
     b.writeln('i=0');
+    b.writeln('LOADED_OURS=0');
     b.writeln('while [ "\$i" -lt 3 ]; do');
-    b.writeln("  insmod '$kModulesDir/cfg80211.ko' 2>&1");
-    b.writeln("  grep -q '^cfg80211 ' /proc/modules && break");
+    b.writeln("  if insmod '$kModulesDir/cfg80211.ko' 2>&1; then");
+    b.writeln('    LOADED_OURS=1');
+    b.writeln('    break');
+    b.writeln('  fi');
+    b.writeln('  rmmod mac80211 2>/dev/null');
+    b.writeln('  rmmod cfg80211 2>/dev/null');
     b.writeln('  i=\$((i + 1))');
     b.writeln('  sleep 1');
     b.writeln('done');
+    b.writeln('if [ "\$LOADED_OURS" -eq 1 ]; then');
     if (modules.any((m) => m.name == 'mac80211')) {
-      b.writeln("grep -q '^mac80211 ' /proc/modules || insmod '$kModulesDir/mac80211.ko' 2>&1");
+      b.writeln("  grep -q '^mac80211 ' /proc/modules || insmod '$kModulesDir/mac80211.ko' 2>&1");
     }
-    b.writeln("grep -q '^cfg80211 ' /proc/modules && echo OK_NH");
+    b.writeln('  echo OK_NH');
+    b.writeln('else');
+    b.writeln('  echo DMESG_TAIL:');
+    b.writeln("  dmesg 2>/dev/null | grep -iE 'cfg80211|mac80211' | tail -n 15");
+    b.writeln('fi');
     return RootShell.run(b.toString());
   }
 
@@ -178,11 +198,17 @@ class ModuleRepository {
   /// should still be sitting wherever it was at boot; this searches for it
   /// rather than guessing a fixed path, same as it already did for qca_cld3.
   ///
-  /// If the module reloads but no Wi-Fi netdev comes up (still-broken
-  /// firmware attach), this escalates to a PCI unbind/bind of the WLAN
-  /// device — a full re-probe of the platform driver (cnss2, on Qualcomm),
-  /// much closer to what boot actually does than a plain module reload.
-  /// Still no guarantee — see project memory for what's verified vs. not.
+  /// If the module reloads but no Wi-Fi netdev comes up, that means the PCIe
+  /// link itself dropped — confirmed on-device, repeatedly, from a clean
+  /// boot: once rmmod tears this chip down its config space reads back a
+  /// bogus device ID (0xffff) within ~2 seconds, automatically, before any
+  /// recovery code even runs. Bouncing the Wi-Fi service, a plain PCI
+  /// unbind/bind, and even a real hardware FLR reset of the PCI function
+  /// were all tried live and NONE bring it back — only the bootloader's own
+  /// cold-boot power sequencing does. So this makes exactly one attempt and
+  /// reports back fast; there is no escalation worth attempting, and none is
+  /// wired up here anymore (previous versions burned 20-30s retrying a
+  /// unbind/bind loop that could not succeed).
   Future<ShellResult> switchToStock(List<ModuleInfo> modules) {
     final b = StringBuffer();
     for (final m in modules) {
@@ -220,48 +246,12 @@ class ModuleRepository {
     b.writeln("if ! grep -q '^$_vendorWifi ' /proc/modules; then reload_vendor; sleep 2; fi");
     b.writeln('svc wifi enable 2>/dev/null');
     b.writeln('sleep 2');
-    b.writeln('if ! wlan_up; then');
-    // Some Qualcomm WLAN HALs need the Wi-Fi service bounced twice before
-    // they re-attach to a freshly re-inserted driver.
-    b.writeln('  svc wifi disable 2>/dev/null');
-    b.writeln('  sleep 1');
-    b.writeln('  svc wifi enable 2>/dev/null');
-    b.writeln('  sleep 2');
-    b.writeln('fi');
-    b.writeln('if ! wlan_up; then');
-    // Module loaded but firmware/radio never came up — force a full PCI
-    // re-probe of the WLAN device instead of just the driver module. A
-    // single unbind/bind pass isn't always enough: on real hardware the
-    // config space can still read back a bogus device ID (0xffff) if the
-    // bus hasn't finished settling after unbind, which fails the re-probe
-    // outright — so retry the whole unbind/bind cycle with a longer bind
-    // settle before giving up, and stop as soon as the interface is up.
-    b.writeln('  pci_reprobe=0');
-    b.writeln('  while [ "\$pci_reprobe" -lt 2 ] && ! wlan_up; do');
-    b.writeln('    for d in /sys/bus/pci/devices/*/; do');
-    b.writeln('      case "\$(cat "\${d}class" 2>/dev/null)" in 0x0280*)');
-    b.writeln('        WNAME=\$(basename "\$d")');
-    b.writeln('        WDRV=\$(basename "\$(readlink -f "\${d}driver" 2>/dev/null)")');
-    b.writeln('        if [ -n "\$WDRV" ]; then');
-    b.writeln('          echo "\$WNAME" > "/sys/bus/pci/drivers/\$WDRV/unbind" 2>/dev/null');
-    b.writeln('          sleep 2');
-    b.writeln('          echo "\$WNAME" > "/sys/bus/pci/drivers/\$WDRV/bind" 2>/dev/null');
-    b.writeln('          sleep 5');
-    b.writeln('        fi');
-    b.writeln('        ;;');
-    b.writeln('      esac');
-    b.writeln('    done');
-    b.writeln('    svc wifi enable 2>/dev/null');
-    b.writeln('    sleep 2');
-    b.writeln('    pci_reprobe=\$((pci_reprobe + 1))');
-    b.writeln('  done');
-    b.writeln('fi');
     b.writeln('echo STOCK_CHECK:');
     b.writeln("grep -c '^$_vendorWifi ' /proc/modules");
     b.writeln('wlan_up && echo WLAN_UP:1 || echo WLAN_UP:0');
     b.writeln('echo DMESG_TAIL:');
     b.writeln("dmesg 2>/dev/null | grep -iE 'wlan|cnss|qca|cld3' | tail -n 15");
-    return RootShell.run(b.toString(), timeout: const Duration(seconds: 45));
+    return RootShell.run(b.toString(), timeout: const Duration(seconds: 20));
   }
 
   /// True only if the vendor module is loaded AND a wlan interface is
@@ -272,10 +262,15 @@ class ModuleRepository {
     return moduleOk && interfaceOk;
   }
 
-  /// Last ~15 dmesg lines mentioning wlan/cnss/qca/cld3, captured by
-  /// [switchToStock] — for surfacing to the user or attaching to a bug
-  /// report when the automatic restore doesn't work.
-  String? stockRestoreDiagnostics(ShellResult r) {
+  /// Confirmed on-device: once qca_cld3's rmmod drops the WLAN PCIe link,
+  /// nothing short of this brings it back — see [switchToStock]'s PCI
+  /// unbind/bind comment for what was already ruled out.
+  Future<void> reboot() => RootShell.run('reboot', timeout: const Duration(seconds: 3));
+
+  /// The dmesg tail any of switchToStock/switchToNetHunter/setLoaded append
+  /// after a `DMESG_TAIL:` marker — for surfacing to the user or attaching
+  /// to a bug report when an automatic action doesn't work.
+  String? dmesgTail(ShellResult r) {
     final i = r.stdout.indexOf('DMESG_TAIL:');
     if (i < 0) return null;
     final tail = r.stdout.substring(i + 'DMESG_TAIL:'.length).trim();
@@ -311,12 +306,17 @@ class ModuleRepository {
         // Loading cfg80211 by hand still needs the vendor teardown first —
         // and the vendor's OWN cfg80211.ko has to come out too (same module
         // name as ours, can't coexist), or this insmod fails with EEXIST.
+        // mac80211 has to go first: it registers as a cfg80211 client at
+        // insmod time, so cfg80211 stays EBUSY on rmmod while ANY mac80211
+        // is still resident, even one with zero dependents of its own —
+        // see switchToNetHunter's doc for how this bit us on-device.
         final b = StringBuffer();
         b.writeln("if grep -q '^$_vendorWifi ' /proc/modules; then");
         b.writeln('  svc wifi disable 2>/dev/null');
         b.writeln('  sleep 2');
         b.writeln('  rmmod $_vendorWifi 2>/dev/null');
         b.writeln('fi');
+        b.writeln('rmmod mac80211 2>/dev/null');
         b.writeln('rmmod cfg80211 2>/dev/null');
         b.writeln("insmod '$kModulesDir/cfg80211.ko' 2>&1");
         return RootShell.run(b.toString());
@@ -352,16 +352,6 @@ class ModuleRepository {
     b.writeln('echo DMESG_TAIL:');
     b.writeln("dmesg 2>/dev/null | grep -iE '${module.krName}' | tail -n 10");
     return b.toString();
-  }
-
-  /// Same DMESG_TAIL marker as [stockRestoreDiagnostics], for the plain
-  /// insmod/rmmod path — reused by the UI when a module load/unload doesn't
-  /// end up in the state the user asked for.
-  String? loadDiagnostics(ShellResult r) {
-    final i = r.stdout.indexOf('DMESG_TAIL:');
-    if (i < 0) return null;
-    final tail = r.stdout.substring(i + 'DMESG_TAIL:'.length).trim();
-    return tail.isEmpty ? null : tail;
   }
 
   /// The insmod/rmmod output itself, excluding the DMESG_TAIL section that

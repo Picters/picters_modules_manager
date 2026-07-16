@@ -17,9 +17,33 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "requestPinShortcut" -> result.success(requestPinShortcut())
+                "openRootManager" -> result.success(openRootManager())
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /** Launcher package names of the common root managers, most likely first. */
+    private val rootManagers = listOf(
+        "me.weishu.kernelsu",   // KernelSU
+        "me.bmax.apatch",       // APatch
+        "com.topjohnwu.magisk", // Magisk
+    )
+
+    /**
+     * Opens whichever root manager is installed so the user can grant Superuser
+     * access, instead of leaving them to hunt for the app themselves. Returns
+     * false only if none of the known managers is installed.
+     */
+    private fun openRootManager(): Boolean {
+        val pm = packageManager
+        for (pkg in rootManagers) {
+            val intent = pm.getLaunchIntentForPackage(pkg) ?: continue
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            return true
+        }
+        return false
     }
 
     private fun requestPinShortcut(): Boolean {

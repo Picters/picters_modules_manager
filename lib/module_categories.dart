@@ -95,6 +95,38 @@ const Map<String, ModuleCategory> _categoryByModule = {
 ModuleCategory categoryOf(String moduleName) =>
     _categoryByModule[moduleName] ?? ModuleCategory.other;
 
+/// Human-readable one-liners for the modules worth explaining — the Wi-Fi
+/// stack and the adapter chipset drivers most users actually reach for. Others
+/// fall back to just their filename; the category grouping already frames them.
+const Map<String, String> _moduleDescriptions = {
+  'cfg80211': 'Wireless configuration core',
+  'mac80211': 'Soft-MAC 802.11 layer',
+  '88XXau': 'Realtek RTL8812AU / 8821AU',
+  '8188eu': 'Realtek RTL8188EUS',
+  '8814au': 'Realtek RTL8814AU',
+  '88x2bu': 'Realtek RTL8812BU / 8822BU',
+  'rtl8xxxu': 'Realtek USB Wi-Fi (in-tree)',
+  'mt7601u': 'MediaTek MT7601U',
+  'carl9170': 'Atheros AR9170',
+  'ath9k_htc': 'Atheros AR9271 / AR7010',
+  'zd1211rw': 'ZyDAS ZD1211',
+  'btusb': 'Bluetooth USB transport',
+  'hci_uart': 'Bluetooth UART transport',
+  'can': 'Controller Area Network core',
+  'gs_usb': 'Geschwister Schneider USB/CAN',
+  'ftdi_sio': 'FTDI USB serial',
+  'cp210x': 'Silicon Labs CP210x serial',
+  'ch341': 'WCH CH341 USB serial',
+  'pl2303': 'Prolific PL2303 serial',
+  'r8152': 'Realtek USB Gigabit Ethernet',
+  'dvb_usb_v2': 'DVB-T / RTL-SDR core',
+  'rtl2832': 'Realtek RTL2832U demod (SDR)',
+  'nf_tables': 'nftables packet filtering',
+  'ntfs3': 'NTFS read/write filesystem',
+};
+
+String? moduleDescription(String moduleName) => _moduleDescriptions[moduleName];
+
 /// Display order — bigger/more common buckets first.
 const List<ModuleCategory> categoryOrder = [
   ModuleCategory.bluetooth,

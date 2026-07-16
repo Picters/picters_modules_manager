@@ -17,4 +17,15 @@ class NativeBridge {
       return false;
     }
   }
+
+  /// Opens the installed root manager (KernelSU / APatch / Magisk) so the user
+  /// can grant Superuser access without hunting for the app. Returns false if
+  /// none of the known managers is installed.
+  static Future<bool> openRootManager() async {
+    try {
+      return await _channel.invokeMethod<bool>('openRootManager') ?? false;
+    } on PlatformException {
+      return false;
+    }
+  }
 }

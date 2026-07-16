@@ -1,3 +1,4 @@
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
 import 'app_shell.dart';
@@ -10,11 +11,17 @@ class PictersKernelManagerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Picters Kernel Manager',
-      debugShowCheckedModeBanner: false,
-      theme: buildAppTheme(),
-      home: const AppShell(),
+    return DynamicColorBuilder(
+      builder: (lightDynamic, darkDynamic) {
+        return MaterialApp(
+          title: 'Picters Kernel Manager',
+          debugShowCheckedModeBanner: false,
+          themeMode: ThemeMode.system,
+          theme: buildAppTheme(lightDynamic, Brightness.light),
+          darkTheme: buildAppTheme(darkDynamic, Brightness.dark),
+          home: const AppShell(),
+        );
+      },
     );
   }
 }

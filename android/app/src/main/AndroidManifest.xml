@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Self-update check against GitHub Releases — independent of the
+         kernel OOT-modules zip release cadence, see update_checker.dart. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="Picters Kernel Manager"
         android:name="${applicationName}"
@@ -43,5 +47,10 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- So getLaunchIntentForPackage() can find the root manager to open on
+             the "Grant root" screen (Android 11+ package-visibility rules). -->
+        <package android:name="me.weishu.kernelsu"/>
+        <package android:name="me.bmax.apatch"/>
+        <package android:name="com.topjohnwu.magisk"/>
     </queries>
 </manifest>
