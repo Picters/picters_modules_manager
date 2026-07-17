@@ -137,7 +137,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       appBar: AppBar(
         title: Text(granted ? _titles[_tab] : 'Modules Manager'),
         actions: [
-          if (_hasUpdate) _UpdatePill(onTap: () => _showUpdateDialog(context, _controller)),
+          if (_hasUpdate)
+            _UpdatePill(onTap: () => _showUpdateDialog(context, _controller)),
           if (granted)
             IconButton(
               icon: const Icon(Icons.add_to_home_screen_outlined),
@@ -149,38 +150,44 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
       body: switch (_rootStatus) {
         RootStatus.checking => const _CenterGlyph(
-            icon: Icons.hourglass_empty,
-            title: 'Checking root access…',
-            spinner: true,
-          ),
+          icon: Icons.hourglass_empty,
+          title: 'Checking root access…',
+          spinner: true,
+        ),
         RootStatus.denied => _RootDenied(controller: _controller),
         RootStatus.granted => PageView(
-            controller: _pageController,
-            physics: const _SnappyPagePhysics(),
-            onPageChanged: _onPageChanged,
-            children: [
-              OverviewScreen(controller: _controller),
-              ModulesScreen(controller: _controller),
-            ],
-          ),
+          controller: _pageController,
+          physics: const _SnappyPagePhysics(),
+          onPageChanged: _onPageChanged,
+          // Each page its own compositor layer: sliding between them is
+          // then a cheap layer translate instead of repainting both heavy
+          // screens on every frame of the transition.
+          children: [
+            RepaintBoundary(child: OverviewScreen(controller: _controller)),
+            RepaintBoundary(child: ModulesScreen(controller: _controller)),
+          ],
+        ),
       },
       bottomNavigationBar: granted
-          ? NavigationBar(
-              selectedIndex: _tab,
-              onDestinationSelected: _goToTab,
-              labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home),
-                  label: 'Overview',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.tune_outlined),
-                  selectedIcon: Icon(Icons.tune),
-                  label: 'Modules',
-                ),
-              ],
+          ? RepaintBoundary(
+              child: NavigationBar(
+                selectedIndex: _tab,
+                onDestinationSelected: _goToTab,
+                labelBehavior:
+                    NavigationDestinationLabelBehavior.onlyShowSelected,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home),
+                    label: 'Overview',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.tune_outlined),
+                    selectedIcon: Icon(Icons.tune),
+                    label: 'Modules',
+                  ),
+                ],
+              ),
             )
           : null,
     );
@@ -218,7 +225,11 @@ class _RootDenied extends StatelessWidget {
                 color: scheme.errorContainer,
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.lock_outline, size: 40, color: scheme.onErrorContainer),
+              child: Icon(
+                Icons.lock_outline,
+                size: 40,
+                color: scheme.onErrorContainer,
+              ),
             ),
             const SizedBox(height: 24),
             Text('Root required', style: textTheme.headlineSmall),
@@ -227,7 +238,9 @@ class _RootDenied extends StatelessWidget {
               'Grant Superuser access in KernelSU, APatch or Magisk. '
               'The app unlocks itself once you do.',
               textAlign: TextAlign.center,
-              style: textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+              style: textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 28),
             FilledButton.icon(
@@ -259,7 +272,10 @@ void _showUpdateDialog(BuildContext context, AppController controller) {
       showError(context, err);
     } else {
       Navigator.of(context).pop();
-      showInfo(context, 'Update installed — reopen the app to use v${update.version}.');
+      showInfo(
+        context,
+        'Update installed — reopen the app to use v${update.version}.',
+      );
     }
   }
 
@@ -326,7 +342,8 @@ class _UpdatePill extends StatefulWidget {
   State<_UpdatePill> createState() => _UpdatePillState();
 }
 
-class _UpdatePillState extends State<_UpdatePill> with SingleTickerProviderStateMixin {
+class _UpdatePillState extends State<_UpdatePill>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1150),
@@ -360,11 +377,18 @@ class _UpdatePillState extends State<_UpdatePill> with SingleTickerProviderState
                 widget.onTap();
               },
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.system_update, size: 17, color: scheme.onPrimary),
+                    Icon(
+                      Icons.system_update,
+                      size: 17,
+                      color: scheme.onPrimary,
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       'Update',
