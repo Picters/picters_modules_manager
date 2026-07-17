@@ -34,12 +34,16 @@ class _SnappyPagePhysics extends PageScrollPhysics {
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final AppController _controller = AppController(ModuleRepository());
   final PageController _pageController = PageController();
-  int _tab = 0;
 
   // Only the fields the shell chrome needs, so the 1s poll doesn't rebuild
   // the whole Scaffold — the two screens have their own AnimatedBuilders.
   RootStatus _rootStatus = RootStatus.checking;
   bool _hasUpdate = false;
+
+  // The active tab as a notifier, NOT setState: only the AppBar title and the
+  // nav bar listen to it, so switching tabs never rebuilds the PageView or the
+  // two heavy screens. (Doing that mid-swipe was the freeze-then-jump.)
+  final ValueNotifier<int> _tab = ValueNotifier(0);
 
   static const _titles = ['Overview', 'Modules'];
 
@@ -56,6 +60,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_handleControllerChanged);
     _pageController.dispose();
+    _tab.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -79,11 +84,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _pageAnimGen = 0;
 
   void _goToTab(int i) {
-    if (i == _tab) return;
+    if (i == _tab.value) return;
     HapticFeedback.selectionClick();
     final gen = ++_pageAnimGen;
     _programmaticPage = true;
-    setState(() => _tab = i);
+    _tab.value = i;
     _pageController
         .animateToPage(
           i,
@@ -98,10 +103,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _onPageChanged(int i) {
-    if (i == _tab) return;
+    if (i == _tab.value) return;
     // A finger-swipe (not a nav-bar tap) gets its own haptic tick.
     if (!_programmaticPage) HapticFeedback.selectionClick();
-    setState(() => _tab = i);
+    _tab.value = i;
   }
 
   Future<void> _pinShortcut() async {
@@ -127,7 +132,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final granted = _rootStatus == RootStatus.granted;
     return Scaffold(
       appBar: AppBar(
-        title: Text(granted ? _titles[_tab] : 'Modules Manager'),
+        title: granted
+            ? ValueListenableBuilder<int>(
+                valueListenable: _tab,
+                builder: (context, tab, _) => Text(_titles[tab]),
+              )
+            : const Text('Modules Manager'),
         actions: [
           if (_hasUpdate)
             _UpdatePill(onTap: () => _showUpdateDialog(context, _controller)),
@@ -173,23 +183,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       },
       bottomNavigationBar: granted
           ? RepaintBoundary(
-              child: NavigationBar(
-                selectedIndex: _tab,
-                onDestinationSelected: _goToTab,
-                labelBehavior:
-                    NavigationDestinationLabelBehavior.onlyShowSelected,
-                destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.home_outlined),
-                    selectedIcon: Icon(Icons.home),
-                    label: 'Overview',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.tune_outlined),
-                    selectedIcon: Icon(Icons.tune),
-                    label: 'Modules',
-                  ),
-                ],
+              child: ValueListenableBuilder<int>(
+                valueListenable: _tab,
+                builder: (context, tab, _) => NavigationBar(
+                  selectedIndex: tab,
+                  onDestinationSelected: _goToTab,
+                  labelBehavior:
+                      NavigationDestinationLabelBehavior.onlyShowSelected,
+                  destinations: const [
+                    NavigationDestination(
+                      icon: Icon(Icons.home_outlined),
+                      selectedIcon: Icon(Icons.home),
+                      label: 'Overview',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.tune_outlined),
+                      selectedIcon: Icon(Icons.tune),
+                      label: 'Modules',
+                    ),
+                  ],
+                ),
               ),
             )
           : null,
