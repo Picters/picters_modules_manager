@@ -22,13 +22,13 @@ class ModuleInfo {
 }
 
 /// Which Wi-Fi stack is live. The whole point of the main screen: one switch
-/// between the stock vendor stack and our NetHunter injection stack.
+/// between the stock vendor stack and our injection stack.
 enum WifiMode {
   /// Vendor qca_cld3 loaded — internal Wi-Fi works, injection off.
   stock,
 
   /// Our kernel cfg80211(+mac80211) loaded, vendor torn down — injection on.
-  nethunter,
+  inject,
 
   /// Neither loaded (e.g. mid-transition or fully unloaded).
   off,

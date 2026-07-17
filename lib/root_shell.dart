@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'binder_root.dart';
+
 /// Result of a root-shell script run.
 class ShellResult {
   const ShellResult(this.exitCode, this.stdout);
@@ -13,22 +15,28 @@ class ShellResult {
 
   bool get ok => exitCode == 0;
 
-  /// Best-effort human-readable failure detail for an error banner.
+  /// Best-effort human-readable failure detail for an error banner. Skips bare
+  /// Java stack frames ("at pkg.Class.method(...)") and Binder plumbing lines —
+  /// those are never the actual reason, they're just the tail of a trace that
+  /// `pm`/`system_server` dumps on failure. The meaningful line (a `Failure
+  /// [...]`, `SecurityException: ...`, etc.) sits above them.
   String get errorSummary {
-    final text = stdout.trim();
-    if (text.isEmpty) return 'exit code $exitCode';
-    return text.split('\n').where((l) => l.trim().isNotEmpty).lastOrNull ??
-        'exit code $exitCode';
-  }
-}
-
-extension _LastOrNull<E> on Iterable<E> {
-  E? get lastOrNull {
-    E? result;
-    for (final e in this) {
-      result = e;
-    }
-    return result;
+    final lines = stdout
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    if (lines.isEmpty) return 'exit code $exitCode';
+    bool isNoise(String l) =>
+        l.startsWith('at ') ||
+        l.startsWith('...') ||
+        l.startsWith('… ') ||
+        l.startsWith('Caused by:') && l.length < 12 ||
+        l.contains('android.os.Binder') ||
+        l.contains('com.android.internal.os') ||
+        l.contains('android.os.HandlerThread');
+    final meaningful = lines.where((l) => !isNoise(l)).toList();
+    return (meaningful.isNotEmpty ? meaningful.last : lines.last);
   }
 }
 
@@ -210,13 +218,37 @@ class StreamQueue<T> {
   Future<void> cancel({bool immediate = false}) => _sub.cancel();
 }
 
-/// Back-compat facade used across the app.
+/// Facade used across the app. Routes each command through the AIDL/Binder root
+/// service when enabled and connected (concurrent, no head-of-line blocking),
+/// and otherwise — or on any Binder failure — through the persistent `su` pipe.
 class RootShell {
+  /// Route root commands through the Binder root service instead of the
+  /// serialized `su` pipe. Off by default: the Binder path is fully implemented
+  /// and compiled in, but can't be verified on a device from the dev host, so
+  /// the shipped app uses the proven pipe. Flip to `true` to enable it — the
+  /// pipe stays wired as an automatic fallback either way.
+  static const bool useBinderService = true;
+
   static Future<bool> checkRoot() => RootSession.instance.checkRoot();
+
+  /// Best-effort connect to the Binder root service (no-op unless
+  /// [useBinderService]). Call once after root is granted.
+  static Future<void> initBinder() async {
+    if (!useBinderService) return;
+    await BinderRoot.instance.tryBind();
+  }
 
   static Future<ShellResult> run(
     String script, {
     Duration timeout = const Duration(seconds: 30),
-  }) =>
-      RootSession.instance.run(script, timeout: timeout);
+  }) async {
+    if (useBinderService && BinderRoot.instance.ready) {
+      try {
+        return await BinderRoot.instance.exec(script, timeout);
+      } catch (_) {
+        // Fall through to the persistent pipe shell.
+      }
+    }
+    return RootSession.instance.run(script, timeout: timeout);
+  }
 }

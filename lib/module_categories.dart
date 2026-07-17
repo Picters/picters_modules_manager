@@ -1,6 +1,6 @@
 /// Categorizes the non-Wi-Fi "other drivers" for the Modules screen.
 /// Sourced directly from android_kernel_xiaomi_sm8850's
-/// arch/arm64/configs/nethunter_modules.list (the actual whitelist the kernel
+/// arch/arm64/configs/extra_modules.list (the actual whitelist the kernel
 /// CI packages), not guessed from module names.
 enum ModuleCategory {
   bluetooth('Bluetooth'),

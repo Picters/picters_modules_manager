@@ -9,6 +9,11 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
+    // AIDL is off by default since AGP 8 — the root-service IPC needs it.
+    buildFeatures {
+        aidl = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -42,4 +47,12 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // libsu: bootstraps and manages the root process that hosts the AIDL
+    // RootService (KernelRootService). `core` = root shell, `service` = the
+    // RootService/IPC bootstrap that hands the service's Binder back to the app.
+    implementation("com.github.topjohnwu.libsu:core:6.0.0")
+    implementation("com.github.topjohnwu.libsu:service:6.0.0")
 }

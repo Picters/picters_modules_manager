@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package:flutter/cupertino.dart' show CupertinoSliverRefreshControl, RefreshIndicatorMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -85,7 +88,110 @@ Future<bool> confirmAction(
   return result ?? false;
 }
 
-/// A soft pulsing dot — the "live / active" cue on the NetHunter hero card.
+/// Confirmation shown when a module can't load until other modules are up: it
+/// names them and offers to enable all of them (in dependency order) plus the
+/// target in one go. Returns true if confirmed.
+Future<bool?> showDependencyDialog(
+  BuildContext context, {
+  required String module,
+  required List<String> deps,
+}) {
+  return _dependencyDialog(
+    context,
+    icon: Icons.account_tree_outlined,
+    title: 'Enable required modules?',
+    lead: '$module needs these modules loaded first:',
+    modules: deps,
+    note: "They'll be enabled in order, then $module.",
+    confirmLabel: 'Enable all',
+  );
+}
+
+/// Confirmation shown when unloading a module that others still depend on: it
+/// names the dependents and offers to unload them first. Returns true if
+/// confirmed.
+Future<bool?> showDependentsDialog(
+  BuildContext context, {
+  required String module,
+  required List<String> dependents,
+}) {
+  return _dependencyDialog(
+    context,
+    icon: Icons.link_off,
+    title: 'Unload dependent modules?',
+    lead: '$module is still in use by:',
+    modules: dependents,
+    note: "They'll be unloaded first, then $module.",
+    confirmLabel: 'Unload all',
+  );
+}
+
+Future<bool?> _dependencyDialog(
+  BuildContext context, {
+  required IconData icon,
+  required String title,
+  required String lead,
+  required List<String> modules,
+  required String note,
+  required String confirmLabel,
+}) {
+  final scheme = Theme.of(context).colorScheme;
+  final textTheme = Theme.of(context).textTheme;
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      icon: Icon(icon),
+      title: Text(title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(lead, style: textTheme.bodyMedium),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final m in modules)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    m,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            note,
+            style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(confirmLabel),
+        ),
+      ],
+    ),
+  );
+}
+
+/// A soft pulsing dot — the "live / active" cue on the Inject hero card.
 class PulsingDot extends StatefulWidget {
   const PulsingDot({super.key, required this.color, this.size = 8});
 
@@ -204,25 +310,36 @@ class CardDivider extends StatelessWidget {
 /// widget gets a fresh element (e.g. a list item shifting position), which
 /// is the desired "appearing" effect for newly-plugged adapters too.
 class FadeInSlide extends StatefulWidget {
-  const FadeInSlide({super.key, required this.child, this.delay = Duration.zero});
+  const FadeInSlide({
+    super.key,
+    required this.child,
+    this.delay = Duration.zero,
+    this.offset = const Offset(0, 0.08),
+    this.scaleFrom = 0.97,
+    this.curve = Curves.easeOutCubic,
+    this.duration = const Duration(milliseconds: 460),
+  });
 
   final Widget child;
   final Duration delay;
+  final Offset offset;
+  final double scaleFrom;
+  final Curve curve;
+  final Duration duration;
 
   @override
   State<FadeInSlide> createState() => _FadeInSlideState();
 }
 
 class _FadeInSlideState extends State<FadeInSlide> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 380),
-  );
-  late final Animation<double> _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
-  late final Animation<Offset> _slide = Tween(
-    begin: const Offset(0, 0.06),
-    end: Offset.zero,
-  ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+  late final AnimationController _controller =
+      AnimationController(vsync: this, duration: widget.duration);
+  late final Animation<double> _fade =
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+  late final Animation<Offset> _slide = Tween(begin: widget.offset, end: Offset.zero)
+      .animate(CurvedAnimation(parent: _controller, curve: widget.curve));
+  late final Animation<double> _scale = Tween(begin: widget.scaleFrom, end: 1.0)
+      .animate(CurvedAnimation(parent: _controller, curve: widget.curve));
 
   @override
   void initState() {
@@ -242,7 +359,76 @@ class _FadeInSlideState extends State<FadeInSlide> with SingleTickerProviderStat
   Widget build(BuildContext context) {
     return FadeTransition(
       opacity: _fade,
-      child: SlideTransition(position: _slide, child: widget.child),
+      child: SlideTransition(
+        position: _slide,
+        child: ScaleTransition(
+          scale: _scale,
+          alignment: Alignment.topCenter,
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Reveals a child by "unfolding" it: its height opens from zero (anchored at
+/// the top) while it fades and eases up to full scale, so a staggered list
+/// appears to unfold itself downward. Used for the plugged-in adapter rows.
+class UnfoldIn extends StatefulWidget {
+  const UnfoldIn({
+    super.key,
+    required this.child,
+    this.delay = Duration.zero,
+    this.duration = const Duration(milliseconds: 540),
+  });
+
+  final Widget child;
+  final Duration delay;
+  final Duration duration;
+
+  @override
+  State<UnfoldIn> createState() => _UnfoldInState();
+}
+
+class _UnfoldInState extends State<UnfoldIn> with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: widget.duration);
+  late final Animation<double> _size =
+      CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _c,
+    curve: const Interval(0.15, 1.0, curve: Curves.easeOut),
+  );
+  late final Animation<double> _scale = Tween(begin: 0.95, end: 1.0)
+      .animate(CurvedAnimation(parent: _c, curve: Curves.easeOutCubic));
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(widget.delay, () {
+      if (mounted) _c.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizeTransition(
+      sizeFactor: _size,
+      alignment: Alignment.topCenter,
+      child: FadeTransition(
+        opacity: _fade,
+        child: ScaleTransition(
+          scale: _scale,
+          alignment: Alignment.topCenter,
+          child: widget.child,
+        ),
+      ),
     );
   }
 }
@@ -264,6 +450,163 @@ class AnimatedSection extends StatelessWidget {
         duration: const Duration(milliseconds: 250),
         child: child,
       ),
+    );
+  }
+}
+
+/// The app's loading indicator, in the Android 17 / Material 3 Expressive
+/// language: a soft-cornered polygon that continuously morphs between a
+/// triangle, square, pentagon and hexagon while it spins. Used everywhere a
+/// spinner used to be, and as the pull-to-refresh glyph.
+class MorphingPolygon extends StatefulWidget {
+  const MorphingPolygon({super.key, this.size = 34, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  State<MorphingPolygon> createState() => _MorphingPolygonState();
+}
+
+class _MorphingPolygonState extends State<MorphingPolygon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2800),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: widget.size,
+      child: RepaintBoundary(
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (context, _) => CustomPaint(
+            painter: _PolygonPainter(t: _c.value, color: widget.color),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PolygonPainter extends CustomPainter {
+  _PolygonPainter({required this.t, required this.color});
+
+  final double t;
+  final Color color;
+
+  // The shapes it cycles through, by lobe count.
+  static const _lobes = <int>[3, 4, 5, 6, 4];
+  static const _amp = 0.17; // how pronounced the corners read
+  static const _steps = 150;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2;
+
+    final span = _lobes.length;
+    final scaled = t * span;
+    final i = scaled.floor() % span;
+    final blend = Curves.easeInOut.transform(scaled - scaled.floorToDouble());
+    final nA = _lobes[i].toDouble();
+    final nB = _lobes[(i + 1) % span].toDouble();
+    final phase = t * 2 * math.pi; // continuous rotation
+
+    final path = Path();
+    for (var k = 0; k <= _steps; k++) {
+      final theta = (k / _steps) * 2 * math.pi;
+      final lobe = _lerp(math.cos(nA * theta), math.cos(nB * theta), blend);
+      final r = radius * (1 + _amp * lobe) / (1 + _amp);
+      final a = theta + phase;
+      final p = center + Offset(math.cos(a), math.sin(a)) * r;
+      if (k == 0) {
+        path.moveTo(p.dx, p.dy);
+      } else {
+        path.lineTo(p.dx, p.dy);
+      }
+    }
+    path.close();
+
+    canvas.drawPath(path, Paint()..color = color..isAntiAlias = true);
+  }
+
+  static double _lerp(double a, double b, double t) => a + (b - a) * t;
+
+  @override
+  bool shouldRepaint(_PolygonPainter old) => old.t != t || old.color != color;
+}
+
+/// A scrollable list with the app's own Android-17-style pull-to-refresh: an
+/// overscroll reveals the [MorphingPolygon] instead of the stock circular
+/// spinner. Built on a Cupertino sliver refresh control so the whole indicator
+/// is ours to draw.
+class PolygonScrollView extends StatelessWidget {
+  const PolygonScrollView({
+    super.key,
+    required this.onRefresh,
+    required this.padding,
+    required this.children,
+  });
+
+  final Future<void> Function() onRefresh;
+  final EdgeInsets padding;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    // Cap content width and centre it on wide screens (tablet / landscape),
+    // where one full-width column would otherwise stretch out and look sparse.
+    final width = MediaQuery.sizeOf(context).width;
+    const maxContent = 640.0;
+    final side = width > maxContent ? (width - maxContent) / 2 : 0.0;
+    final effectivePadding = EdgeInsets.fromLTRB(
+      padding.left + side,
+      padding.top,
+      padding.right + side,
+      padding.bottom,
+    );
+    return CustomScrollView(
+      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+      slivers: [
+        CupertinoSliverRefreshControl(
+          onRefresh: () {
+            HapticFeedback.mediumImpact();
+            return onRefresh();
+          },
+          refreshTriggerPullDistance: 120,
+          refreshIndicatorExtent: 86,
+          builder: (context, mode, pulled, triggerDistance, indicatorExtent) {
+            final t = (pulled / triggerDistance).clamp(0.0, 1.0);
+            final showing = mode != RefreshIndicatorMode.inactive;
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 20),
+                child: Opacity(
+                  opacity: showing ? Curves.easeOut.transform(t) : 0,
+                  child: Transform.scale(
+                    scale: 0.55 + 0.45 * t,
+                    child: MorphingPolygon(size: 34, color: color),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+        SliverPadding(
+          padding: effectivePadding,
+          sliver: SliverList(delegate: SliverChildListDelegate(children)),
+        ),
+      ],
     );
   }
 }

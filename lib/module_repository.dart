@@ -5,7 +5,7 @@ import 'usb_devices.dart';
 const String kModulesDir = '/system/lib/modules';
 
 /// cfg80211/mac80211 + every chipset driver that conflicts with the vendor
-/// qca_cld3 stack (same set as the kernel CI's old nh-modules.sh NH_WIFI list).
+/// qca_cld3 stack (same set the module's boot service.sh skips at load time).
 const Set<String> kWifiClassModules = <String>{
   'cfg80211', 'mac80211',
   '88XXau', '8188eu', '8814au', '88x2bu',
@@ -21,7 +21,7 @@ const String _mModules = '___PMM_MODS___';
 const String _mProc = '___PMM_PROC___';
 
 /// Thrown before any root command runs when a precondition fails — e.g. loading
-/// an adapter while the NetHunter Wi-Fi stack is off.
+/// an adapter while the injection Wi-Fi stack is off.
 class ModulePrecondition implements Exception {
   const ModulePrecondition(this.message);
   final String message;
@@ -101,7 +101,7 @@ class ModuleRepository {
     final mac = loaded.contains('mac80211');
     final mode = vendorLoaded
         ? WifiMode.stock
-        : (cfg ? WifiMode.nethunter : WifiMode.off);
+        : (cfg ? WifiMode.inject : WifiMode.off);
 
     return SystemState(
       modules: modules,
@@ -113,9 +113,6 @@ class ModuleRepository {
       modulesDirExists: dirExists,
     );
   }
-
-  bool _has(List<ModuleInfo> modules, String name) =>
-      modules.any((m) => m.name == name && m.loaded);
 
   // ── High-level Wi-Fi mode switch (the main screen) ──────────────────────
 
@@ -131,7 +128,7 @@ class ModuleRepository {
   /// insmod'ing ours if so, which meant it silently never actually switched
   /// once the vendor one was resident. Fixed: unconditionally evict whatever
   /// cfg80211 is currently there before loading ours.
-  Future<ShellResult> switchToNetHunter(List<ModuleInfo> modules) {
+  Future<ShellResult> switchToInject(List<ModuleInfo> modules) {
     final hasCfg = modules.any((m) => m.name == 'cfg80211');
     if (!hasCfg) {
       throw const ModulePrecondition('cfg80211.ko is not staged in this module');
@@ -151,7 +148,7 @@ class ModuleRepository {
     // cfg80211 exits 1 every time, our insmod then fails "File exists"
     // against the still-resident (vendor) cfg80211, and the old grep-based
     // success check couldn't tell "a cfg80211 is loaded" from "OUR cfg80211
-    // is loaded" — so it reported OK_NH while nothing had actually switched,
+    // is loaded" — so it reported OK_INJECT while nothing had actually switched,
     // and mac80211/the adapter drivers loaded against the wrong cfg80211
     // next, which is what threw "disagrees about version of symbol".
     b.writeln('rmmod mac80211 2>/dev/null');
@@ -178,7 +175,7 @@ class ModuleRepository {
     if (modules.any((m) => m.name == 'mac80211')) {
       b.writeln("  grep -q '^mac80211 ' /proc/modules || insmod '$kModulesDir/mac80211.ko' 2>&1");
     }
-    b.writeln('  echo OK_NH');
+    b.writeln('  echo OK_INJECT');
     b.writeln('else');
     b.writeln('  echo DMESG_TAIL:');
     b.writeln("  dmesg 2>/dev/null | grep -iE 'cfg80211|mac80211' | tail -n 15");
@@ -186,88 +183,17 @@ class ModuleRepository {
     return RootShell.run(b.toString());
   }
 
-  /// Unwind our whole stack and bring the stock vendor Wi-Fi back without a
-  /// reboot if possible. Verifies via /proc/modules AND an actual up
-  /// interface rather than assuming — a loaded qca_cld3 with no working
-  /// firmware still shows up in /proc/modules, which is exactly the failure
-  /// mode reported on real hardware: module present, radio never comes up.
-  ///
-  /// The vendor's own cfg80211.ko (see switchToNetHunter's doc) still has to
-  /// be reloaded BEFORE qca_cld3 — qca_cld3 won't insmod against our cfg80211
-  /// (wrong symbol versions). It's a vendor file we never touched, so it
-  /// should still be sitting wherever it was at boot; this searches for it
-  /// rather than guessing a fixed path, same as it already did for qca_cld3.
-  ///
-  /// If the module reloads but no Wi-Fi netdev comes up, that means the PCIe
-  /// link itself dropped — confirmed on-device, repeatedly, from a clean
-  /// boot: once rmmod tears this chip down its config space reads back a
-  /// bogus device ID (0xffff) within ~2 seconds, automatically, before any
-  /// recovery code even runs. Bouncing the Wi-Fi service, a plain PCI
-  /// unbind/bind, and even a real hardware FLR reset of the PCI function
-  /// were all tried live and NONE bring it back — only the bootloader's own
-  /// cold-boot power sequencing does. So this makes exactly one attempt and
-  /// reports back fast; there is no escalation worth attempting, and none is
-  /// wired up here anymore (previous versions burned 20-30s retrying a
-  /// unbind/bind loop that could not succeed).
-  Future<ShellResult> switchToStock(List<ModuleInfo> modules) {
-    final b = StringBuffer();
-    for (final m in modules) {
-      if (m.loaded &&
-          m.isWifiClass &&
-          m.name != 'cfg80211' &&
-          m.name != 'mac80211') {
-        b.writeln("rmmod '${m.krName}' 2>/dev/null");
-      }
-    }
-    b.writeln('rmmod mac80211 2>/dev/null');
-    b.writeln('rmmod cfg80211 2>/dev/null');
-    b.writeln('');
-    b.writeln('wlan_up() {');
-    b.writeln('  for n in /sys/class/net/*/; do');
-    b.writeln('    nm=\$(basename "\$n")');
-    b.writeln('    case "\$nm" in wlan*|wlp*)');
-    b.writeln('      [ "\$(cat "\${n}operstate" 2>/dev/null)" = "up" ] && return 0');
-    b.writeln('      ;;');
-    b.writeln('    esac');
-    b.writeln('  done');
-    b.writeln('  return 1');
-    b.writeln('}');
-    b.writeln('reload_vendor() {');
-    b.writeln("  grep -q '^cfg80211 ' /proc/modules && return 0");
-    b.writeln(
-      "  VCFG=\$(find /vendor /vendor_dlkm -name 'cfg80211.ko' 2>/dev/null | head -1)",
-    );
-    b.writeln('  [ -n "\$VCFG" ] && insmod "\$VCFG" 2>&1');
-    b.writeln(
-      "  V=\$(find /vendor /vendor_dlkm -name '$_vendorWifi.ko' 2>/dev/null | head -1)",
-    );
-    b.writeln('  [ -n "\$V" ] && insmod "\$V" 2>&1');
-    b.writeln('}');
-    b.writeln("if ! grep -q '^$_vendorWifi ' /proc/modules; then reload_vendor; sleep 2; fi");
-    b.writeln('svc wifi enable 2>/dev/null');
-    b.writeln('sleep 2');
-    b.writeln('echo STOCK_CHECK:');
-    b.writeln("grep -c '^$_vendorWifi ' /proc/modules");
-    b.writeln('wlan_up && echo WLAN_UP:1 || echo WLAN_UP:0');
-    b.writeln('echo DMESG_TAIL:');
-    b.writeln("dmesg 2>/dev/null | grep -iE 'wlan|cnss|qca|cld3' | tail -n 15");
-    return RootShell.run(b.toString(), timeout: const Duration(seconds: 20));
-  }
-
-  /// True only if the vendor module is loaded AND a wlan interface is
-  /// actually administratively up — not just "module present".
-  bool stockRestored(ShellResult r) {
-    final moduleOk = _markerCount(r.stdout, 'STOCK_CHECK:') > 0;
-    final interfaceOk = r.stdout.contains('WLAN_UP:1');
-    return moduleOk && interfaceOk;
-  }
-
-  /// Confirmed on-device: once qca_cld3's rmmod drops the WLAN PCIe link,
-  /// nothing short of this brings it back — see [switchToStock]'s PCI
-  /// unbind/bind comment for what was already ruled out.
+  /// Restoring the stock vendor Wi-Fi is intentionally NOT attempted in
+  /// software: confirmed on-device, once qca_cld3's rmmod drops the WLAN PCIe
+  /// link the chip's config space reads back 0xffff within ~2s and nothing
+  /// short of a cold reboot brings it back — bouncing the Wi-Fi service, a
+  /// plain PCI unbind/bind, and even a real hardware FLR reset were all tried
+  /// live and none worked. So the UI goes straight to a reboot prompt (a
+  /// reboot restores stock cleanly: OOT modules unload on boot, the vendor
+  /// stack loads normally) and this just performs it.
   Future<void> reboot() => RootShell.run('reboot', timeout: const Duration(seconds: 3));
 
-  /// The dmesg tail any of switchToStock/switchToNetHunter/setLoaded append
+  /// The dmesg tail any of switchToStock/switchToInject/setLoaded append
   /// after a `DMESG_TAIL:` marker — for surfacing to the user or attaching
   /// to a bug report when an automatic action doesn't work.
   String? dmesgTail(ShellResult r) {
@@ -277,31 +203,14 @@ class ModuleRepository {
     return tail.isEmpty ? null : tail;
   }
 
-  int _markerCount(String stdout, String marker) {
-    final i = stdout.indexOf(marker);
-    if (i < 0) return 0;
-    final rest = stdout.substring(i + marker.length).trim();
-    return int.tryParse(rest.split('\n').first.trim()) ?? 0;
-  }
-
   // ── Individual module toggle (the deep-config tab) ──────────────────────
 
-  Future<ShellResult> setLoaded(
-    ModuleInfo module,
-    bool wantLoaded,
-    List<ModuleInfo> current,
-  ) {
+  /// Loads or unloads a single module. Dependency ordering is resolved a level
+  /// up (the controller, via module_dependencies.dart) and executed through
+  /// [loadChain]/[unloadChain]; this is the plain one-module path used when a
+  /// module has nothing else to pull in.
+  Future<ShellResult> setLoaded(ModuleInfo module, bool wantLoaded) {
     if (wantLoaded) {
-      if (module.isWifiClass &&
-          module.name != 'cfg80211' &&
-          module.name != 'mac80211') {
-        if (!_has(current, 'cfg80211')) {
-          throw const ModulePrecondition('Enable cfg80211 first');
-        }
-        if (!_has(current, 'mac80211')) {
-          throw const ModulePrecondition('Enable mac80211 first');
-        }
-      }
       if (module.name == 'cfg80211') {
         // Loading cfg80211 by hand still needs the vendor teardown first —
         // and the vendor's OWN cfg80211.ko has to come out too (same module
@@ -309,7 +218,7 @@ class ModuleRepository {
         // mac80211 has to go first: it registers as a cfg80211 client at
         // insmod time, so cfg80211 stays EBUSY on rmmod while ANY mac80211
         // is still resident, even one with zero dependents of its own —
-        // see switchToNetHunter's doc for how this bit us on-device.
+        // see switchToInject's doc for how this bit us on-device.
         final b = StringBuffer();
         b.writeln("if grep -q '^$_vendorWifi ' /proc/modules; then");
         b.writeln('  svc wifi disable 2>/dev/null');
@@ -326,17 +235,82 @@ class ModuleRepository {
     return RootShell.run("rmmod '${module.krName}' 2>&1");
   }
 
-  /// insmod, with a couple of retries a second apart, plus a module-specific
-  /// dmesg tail always appended. Fixes a real race: right after cfg80211/
-  /// mac80211 come up they're already visible in /proc/modules (so the
-  /// precondition check above passes), but the wireless core can need a
+  /// insmod several modules in dependency order (deepest dependency first),
+  /// each with the same settle-retry as a single load; stops at the first that
+  /// won't come up, reporting it as `CHAIN_FAIL:<name>`. The app resolves the
+  /// order itself (see module_dependencies.dart) — there's no modules.dep on
+  /// this device for `modprobe` to use.
+  Future<ShellResult> loadChain(List<ModuleInfo> ordered) => RootShell.run(
+        _loadChainScript(ordered),
+        timeout: Duration(seconds: 20 + 10 * ordered.length),
+      );
+
+  String _loadChainScript(List<ModuleInfo> ordered) {
+    final b = StringBuffer();
+    for (final m in ordered) {
+      final path = "$kModulesDir/${m.name}.ko";
+      b.writeln('OUT=""');
+      b.writeln('i=0');
+      b.writeln('while [ "\$i" -lt 3 ]; do');
+      b.writeln("  OUT=\$(insmod '$path' 2>&1)");
+      b.writeln("  grep -q '^${m.krName} ' /proc/modules && break");
+      b.writeln('  i=\$((i + 1))');
+      b.writeln('  sleep 1');
+      b.writeln('done');
+      b.writeln("if ! grep -q '^${m.krName} ' /proc/modules; then");
+      b.writeln('  echo "CHAIN_FAIL:${m.name}"');
+      b.writeln('  echo "\$OUT"');
+      b.writeln('  exit 0');
+      b.writeln('fi');
+    }
+    b.writeln('echo OK_CHAIN');
+    return b.toString();
+  }
+
+  /// rmmod several modules in order (outermost users first), stopping at the
+  /// first that won't unload — used to clear a shared module's dependents
+  /// before removing it, instead of failing with a bare "Module is in use".
+  Future<ShellResult> unloadChain(List<ModuleInfo> ordered) => RootShell.run(
+        _unloadChainScript(ordered),
+        timeout: Duration(seconds: 15 + 5 * ordered.length),
+      );
+
+  String _unloadChainScript(List<ModuleInfo> ordered) {
+    final b = StringBuffer();
+    for (final m in ordered) {
+      b.writeln("OUT=\$(rmmod '${m.krName}' 2>&1)");
+      b.writeln("if grep -q '^${m.krName} ' /proc/modules; then");
+      b.writeln('  echo "CHAIN_FAIL:${m.name}"');
+      b.writeln('  echo "\$OUT"');
+      b.writeln('  exit 0');
+      b.writeln('fi');
+    }
+    b.writeln('echo OK_CHAIN');
+    return b.toString();
+  }
+
+  /// null when a loadChain/unloadChain reported OK_CHAIN, otherwise the name of
+  /// the module the chain stopped on.
+  String? chainFailure(ShellResult r) {
+    if (r.stdout.contains('OK_CHAIN')) return null;
+    return RegExp(r'CHAIN_FAIL:(\S+)').firstMatch(r.stdout)?.group(1);
+  }
+
+  /// insmod, with a couple of retries a second apart. Fixes a real race: right
+  /// after cfg80211/mac80211 come up they're already visible in /proc/modules
+  /// (so the precondition check above passes), but the wireless core can need a
   /// moment longer before it's actually ready to accept a new adapter
   /// registering against it — a driver probing too early gets "Invalid
   /// argument" from insmod even though nothing is really wrong; the exact
   /// same insmod succeeds a second later. Retrying here means the user
   /// doesn't have to notice that and retry by hand (as happened before this
-  /// fix — toggling NetHunter mode off/on again just gave it more time to
+  /// fix — toggling Inject mode off/on again just gave it more time to
   /// settle before the next attempt).
+  ///
+  /// The dmesg tail is deliberately NOT collected here — it's fetched lazily by
+  /// [moduleDmesg] only if the user taps the error icon, so a failed toggle
+  /// returns fast and never holds the (serialized) root shell blocking the next
+  /// module the user tries to toggle.
   String _insmodWithRetryScript(ModuleInfo module) {
     final path = "$kModulesDir/${module.name}.ko";
     final b = StringBuffer();
@@ -349,9 +323,16 @@ class ModuleRepository {
     b.writeln('  sleep 1');
     b.writeln('done');
     b.writeln('echo "\$OUT"');
-    b.writeln('echo DMESG_TAIL:');
-    b.writeln("dmesg 2>/dev/null | grep -iE '${module.krName}' | tail -n 10");
     return b.toString();
+  }
+
+  /// On-demand dmesg tail for one module — run only when the user taps a row's
+  /// error icon, never as part of a toggle (see [_insmodWithRetryScript]).
+  Future<String> moduleDmesg(ModuleInfo module) async {
+    final r = await RootShell.run(
+      "dmesg 2>/dev/null | grep -iE '${module.krName}' | tail -n 20",
+    );
+    return r.stdout.trim();
   }
 
   /// The insmod/rmmod output itself, excluding the DMESG_TAIL section that

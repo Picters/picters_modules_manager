@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'module_dependencies.dart';
 import 'module_info.dart';
 import 'module_repository.dart';
 import 'root_shell.dart';
@@ -40,6 +41,7 @@ class AppController extends ChangeNotifier {
     rootStatus = ok ? RootStatus.granted : RootStatus.denied;
     notifyListeners();
     if (ok) {
+      unawaited(RootShell.initBinder());
       await _pollOnce(force: true);
       _startTimer();
       unawaited(_checkForUpdate());
@@ -80,17 +82,23 @@ class AppController extends ChangeNotifier {
           notifyListeners();
         },
       );
-      // Stream the bytes into pm via stdin rather than `pm install <path>`:
-      // the APK lives in the app's private cache, which installd (running as
-      // system, not root) can't open — but the root shell can read it fine and
-      // pipe it in, so `-S <size> -` sidesteps the permission problem entirely.
-      final size = await apk.length();
+      // Copy the APK into /data/local/tmp — a spot the platform installer
+      // (installd, running as system, not root) can actually read, unlike the
+      // app's private cache — then install by path. `-d` allows a same/older
+      // versionCode so the update isn't refused as a "downgrade". A signature
+      // mismatch (e.g. a locally debug-signed build vs the release key) can't
+      // be auto-resolved and is reported clearly instead.
+      const dest = '/data/local/tmp/pmm_update.apk';
       final result = await RootShell.run(
-        "cat '${apk.path}' | pm install -r -S $size -",
+        "cp '${apk.path}' '$dest' && chmod 644 '$dest' && "
+        "pm install -r -d '$dest'; rm -f '$dest'",
         timeout: const Duration(seconds: 120),
       );
+      try {
+        await apk.delete();
+      } catch (_) {}
       if (!result.stdout.contains('Success')) {
-        return 'Install failed: ${result.errorSummary}';
+        return _installErrorMessage(result);
       }
       availableUpdate = null;
       return null;
@@ -101,6 +109,35 @@ class AppController extends ChangeNotifier {
       updateProgress = null;
       notifyListeners();
     }
+  }
+
+  /// Turns a failed `pm install` into a message that names the actual reason,
+  /// mapping the common INSTALL_FAILED_* codes to plain language. Without this
+  /// the UI showed whatever line `pm` printed last — usually a bare Binder
+  /// stack frame — which told the user nothing.
+  String _installErrorMessage(ShellResult r) {
+    final lower = r.stdout.toLowerCase();
+    if (lower.contains('signatures do not match') ||
+        lower.contains('update_incompatible') ||
+        lower.contains('inconsistent_certificates') ||
+        lower.contains('no_matching_signatures')) {
+      return 'Signature mismatch — the installed build was signed with a '
+          'different key than this release. Uninstall the current app, then '
+          'install the update manually.';
+    }
+    if (lower.contains('version_downgrade') || lower.contains('older_sdk')) {
+      return 'This release is older than the version already installed.';
+    }
+    if (lower.contains('insufficient_storage')) {
+      return 'Not enough free storage to install the update.';
+    }
+    if (lower.contains('invalid_apk') ||
+        lower.contains('parse_failed') ||
+        lower.contains('no_certificates')) {
+      return 'The downloaded update is invalid or corrupt.';
+    }
+    final fail = RegExp(r'Failure \[[^\]]*\]').firstMatch(r.stdout);
+    return 'Install failed: ${fail?.group(0) ?? r.errorSummary}';
   }
 
   void setForeground(bool value) {
@@ -118,10 +155,28 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  // Adaptive foreground poll cadence: 1s while things are changing or just
+  // after an action, easing out to 5s while nothing changes — fewer idle
+  // wakeups without hurting how live a newly-plugged adapter feels.
+  static const Duration _fastPoll = Duration(seconds: 1);
+  Duration _pollInterval = _fastPoll;
+
   void _startTimer() {
     if (_disposed) return;
+    _pollInterval = _fastPoll;
+    _armPollTimer();
+  }
+
+  /// (Re)arms the single poll timer for the current [_pollInterval]. Self-cancels
+  /// first, so it's always safe to call — a forced poll, a resume, or a detected
+  /// change re-arm it to reset the cadence.
+  void _armPollTimer() {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _pollOnce());
+    if (_disposed || !_foreground || rootStatus != RootStatus.granted) return;
+    _timer = Timer(_pollInterval, () async {
+      await _pollOnce();
+      _armPollTimer();
+    });
   }
 
   /// Manual "Check again" from the root-denied screen — gives immediate
@@ -137,6 +192,7 @@ class AppController extends ChangeNotifier {
     if (ok) {
       rootStatus = RootStatus.granted;
       notifyListeners();
+      unawaited(RootShell.initBinder());
       await _pollOnce(force: true);
       _startTimer();
       unawaited(_checkForUpdate());
@@ -169,16 +225,21 @@ class AppController extends ChangeNotifier {
     _polling = true;
     try {
       final next = await _repo.scan();
-      if (force || next.fingerprint != _lastFingerprint) {
+      final changed = next.fingerprint != _lastFingerprint;
+      if (force || changed) {
         _lastFingerprint = next.fingerprint;
         state = next;
         notifyListeners();
       }
+      _pollInterval = nextPollInterval(_pollInterval, changed: changed || force);
     } catch (_) {
       // Transient — the next tick retries.
     } finally {
       _polling = false;
     }
+    // A forced poll (action / resume / pull-to-refresh) snaps the cadence back
+    // to fast right away instead of waiting out a slow tick.
+    if (force && !_disposed) _armPollTimer();
   }
 
   /// Pull-to-refresh handler.
@@ -210,19 +271,30 @@ class AppController extends ChangeNotifier {
   /// Returns an error string on failure, or null on success.
   Future<String?> setWifiMode(WifiMode target) async {
     if (wifiBusy) return null;
+
+    // Restoring the stock vendor stack is impossible without a cold reboot on
+    // this hardware: once qca_cld3 is torn down the WLAN PCIe link stays down
+    // (config space reads back 0xffff within ~2s; no unbind/bind or FLR reset
+    // brings it back — only the bootloader's cold-boot power sequencing does).
+    // So there's nothing to "switch" to and no point spinning through a doomed
+    // teardown — go straight to the honest reboot prompt. A reboot restores
+    // stock cleanly: every OOT module unloads on boot and the vendor stack
+    // comes up normally.
+    if (target == WifiMode.stock) {
+      lastWifiSwitchDiagnostics = null;
+      lastSwitchNeedsReboot = true;
+      optimisticWifiMode = null;
+      notifyListeners();
+      return null;
+    }
+
     wifiBusy = true;
     optimisticWifiMode = target;
     notifyListeners();
     String? error;
     try {
-      final result = target == WifiMode.nethunter
-          ? await _repo.switchToNetHunter(state.modules)
-          : await _repo.switchToStock(state.modules);
-      if (target == WifiMode.stock && !_repo.stockRestored(result)) {
-        lastWifiSwitchDiagnostics = _repo.dmesgTail(result);
-        lastSwitchNeedsReboot = true;
-        error = "Couldn't restore stock Wi-Fi automatically.";
-      } else if (target == WifiMode.nethunter && !result.stdout.contains('OK_NH')) {
+      final result = await _repo.switchToInject(state.modules);
+      if (!result.stdout.contains('OK_INJECT')) {
         lastWifiSwitchDiagnostics = _repo.dmesgTail(result);
         lastSwitchNeedsReboot = false;
         error = 'Failed to load cfg80211: ${result.errorSummary}';
@@ -250,9 +322,11 @@ class AppController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// The last dmesg tail captured by a failed module load/unload — same idea
-  /// as [lastWifiSwitchDiagnostics], for the per-module toggle path.
-  String? lastModuleDiagnostics;
+  /// Per-module failure state: module name → the message from its last failed
+  /// toggle. Drives the tappable error icon on that row; tapping it fetches the
+  /// dmesg on demand ([fetchModuleDmesg]). Never pops a modal dialog and never
+  /// blocks toggling any other module.
+  final Map<String, String> moduleErrors = {};
 
   /// Same idea as [optimisticWifiMode] but per module name, so each row's
   /// switch flips the instant it's tapped instead of showing a spinner
@@ -262,11 +336,12 @@ class AppController extends ChangeNotifier {
   Future<String?> toggleModule(ModuleInfo module, bool want) async {
     if (moduleBusy.contains(module.name)) return null;
     moduleBusy.add(module.name);
+    moduleErrors.remove(module.name); // clear any prior error when retried
     optimisticModuleLoaded[module.name] = want;
     notifyListeners();
     String? error;
     try {
-      final result = await _repo.setLoaded(module, want, state.modules);
+      final result = await _repo.setLoaded(module, want);
       final after = await _repo.scan();
       state = after;
       _lastFingerprint = after.fingerprint;
@@ -275,19 +350,116 @@ class AppController extends ChangeNotifier {
         orElse: () => module,
       );
       if (now.loaded != want) {
-        lastModuleDiagnostics = _repo.dmesgTail(result);
         error = '${want ? 'Failed to load' : 'Failed to unload'} ${module.name}: '
             '${_repo.loadErrorSummary(result)}';
-      } else {
-        lastModuleDiagnostics = null;
       }
     } on ModulePrecondition catch (e) {
       error = e.message;
     } catch (e) {
       error = 'Error: $e';
     } finally {
+      if (error != null) moduleErrors[module.name] = error;
       moduleBusy.remove(module.name);
       optimisticModuleLoaded.remove(module.name);
+      notifyListeners();
+    }
+    return error;
+  }
+
+  /// Fetches a module's dmesg tail on demand — only when the user taps its
+  /// error icon, so a failed toggle never holds the serialized root shell
+  /// collecting logs (which used to stall the next module's toggle).
+  Future<String> fetchModuleDmesg(ModuleInfo module) => _repo.moduleDmesg(module);
+
+  // ── Dependency-aware load / unload ──────────────────────────────────────
+
+  ModuleInfo? _moduleByName(String name) {
+    for (final m in state.modules) {
+      if (m.name == name) return m;
+    }
+    return null;
+  }
+
+  Set<String> get _availableNames => {for (final m in state.modules) m.name};
+  Set<String> get _loadedNames =>
+      {for (final m in state.modules) if (m.loaded) m.name};
+
+  /// What flipping [module] on needs right now: dependencies to load first, or
+  /// (for a Wi-Fi driver in Stock mode) Inject mode to be enabled.
+  DependencyPlan planFor(ModuleInfo module) => planModuleLoad(
+        target: module.name,
+        available: _availableNames,
+        loaded: _loadedNames,
+        injectActive: state.wifiMode == WifiMode.inject,
+      );
+
+  /// Currently-loaded modules that depend on [module] — the ones an `rmmod`
+  /// would otherwise fail on with "Module is in use".
+  List<String> loadedDependentsOf(ModuleInfo module) => loadedDependents(
+        target: module.name,
+        available: _availableNames,
+        loaded: _loadedNames,
+      );
+
+  /// Loads [depNames] (in order) then [target] in a single root round-trip,
+  /// surfacing an error on whichever module actually failed.
+  Future<String?> loadModuleWithDeps(
+      ModuleInfo target, List<String> depNames) {
+    final ordered = <ModuleInfo>[
+      for (final n in depNames)
+        _moduleByName(n) ??
+            ModuleInfo(name: n, loaded: false, isWifiClass: false),
+      target,
+    ];
+    return _runChain(ordered, load: true, primary: target.name);
+  }
+
+  /// Unloads [dependents] (in order) then [target].
+  Future<String?> unloadModuleWithDependents(
+      ModuleInfo target, List<String> dependents) {
+    final ordered = <ModuleInfo>[
+      for (final n in dependents)
+        _moduleByName(n) ??
+            ModuleInfo(name: n, loaded: true, isWifiClass: false),
+      target,
+    ];
+    return _runChain(ordered, load: false, primary: target.name);
+  }
+
+  Future<String?> _runChain(
+    List<ModuleInfo> ordered, {
+    required bool load,
+    required String primary,
+  }) async {
+    final names = ordered.map((m) => m.name).toList();
+    if (names.any(moduleBusy.contains)) return null;
+    for (final n in names) {
+      moduleBusy.add(n);
+      moduleErrors.remove(n);
+      optimisticModuleLoaded[n] = load;
+    }
+    notifyListeners();
+    String? error;
+    try {
+      final result =
+          await (load ? _repo.loadChain(ordered) : _repo.unloadChain(ordered));
+      final after = await _repo.scan();
+      state = after;
+      _lastFingerprint = after.fingerprint;
+      final failed = _repo.chainFailure(result);
+      if (failed != null) {
+        error = '${load ? 'Failed to load' : 'Failed to unload'} $failed: '
+            '${_repo.loadErrorSummary(result)}';
+        moduleErrors[failed] = error;
+      }
+    } catch (e) {
+      error = 'Error: $e';
+      moduleErrors[primary] = error;
+    } finally {
+      for (final n in names) {
+        moduleBusy.remove(n);
+        optimisticModuleLoaded.remove(n);
+      }
       notifyListeners();
     }
     return error;
@@ -296,8 +468,8 @@ class AppController extends ChangeNotifier {
   Future<String?> loadAdapter(DetectedAdapter adapter) async {
     final driver = adapter.match?.driver;
     if (driver == null) return null;
-    if (state.wifiMode != WifiMode.nethunter) {
-      return 'Enable NetHunter Wi-Fi on the Overview screen first.';
+    if (state.wifiMode != WifiMode.inject) {
+      return 'Enable Inject mode on the Overview screen first.';
     }
     ModuleInfo? mod;
     for (final m in state.modules) {
@@ -323,4 +495,17 @@ class AppController extends ChangeNotifier {
     _timer = null;
     super.dispose();
   }
+}
+
+/// Adaptive foreground-poll cadence: snap back to [fast] the instant something
+/// changed, otherwise ease out one step (1s) toward [slow]. Pure for testing.
+Duration nextPollInterval(
+  Duration current, {
+  required bool changed,
+  Duration fast = const Duration(seconds: 1),
+  Duration slow = const Duration(seconds: 5),
+}) {
+  if (changed) return fast;
+  final next = current + const Duration(seconds: 1);
+  return next > slow ? slow : next;
 }

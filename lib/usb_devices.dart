@@ -32,7 +32,7 @@ class KnownAdapter {
 }
 
 /// Sourced from the exact driver forks this project ships (see
-/// Kokuban_Kernel_CI_Center/configs/projects.json `nethunter_oot_modules`):
+/// Kokuban_Kernel_CI_Center/configs/projects.json `extra_oot_modules`):
 /// aircrack-ng/rtl8812au, aircrack-ng/rtl8188eus, morrownr/8814au,
 /// morrownr/88x2bu-20210702 — each repo's own `supported-device-IDs` file.
 /// Default chipset IDs first, then the reseller-branded IDs from those files.

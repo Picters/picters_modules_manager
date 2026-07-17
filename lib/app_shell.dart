@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter/services.dart';
 
 import 'app_controller.dart';
 import 'module_repository.dart';
@@ -7,6 +7,7 @@ import 'modules_screen.dart';
 import 'native_bridge.dart';
 import 'overview_screen.dart';
 import 'theme.dart';
+import 'widgets.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -17,6 +18,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final AppController _controller = AppController(ModuleRepository());
+  final PageController _pageController = PageController();
   int _tab = 0;
 
   static const _titles = ['Overview', 'Modules'];
@@ -31,6 +33,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _pageController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -38,6 +41,46 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _controller.setForeground(state == AppLifecycleState.resumed);
+  }
+
+  bool _programmaticPage = false;
+
+  void _goToTab(int i) {
+    if (i == _tab) return;
+    HapticFeedback.selectionClick();
+    _programmaticPage = true;
+    setState(() => _tab = i);
+    _pageController
+        .animateToPage(
+          i,
+          duration: const Duration(milliseconds: 360),
+          curve: Curves.easeOutCubic,
+        )
+        .then((_) => _programmaticPage = false);
+  }
+
+  void _onPageChanged(int i) {
+    // A finger-swipe (not a nav-bar tap) gets its own haptic tick.
+    if (!_programmaticPage) HapticFeedback.selectionClick();
+    setState(() => _tab = i);
+  }
+
+  Future<void> _pinShortcut() async {
+    HapticFeedback.lightImpact();
+    final ok = await confirmAction(
+      context,
+      title: 'Pin shortcut?',
+      message: 'Add a home-screen shortcut for this app?',
+      confirmLabel: 'Pin',
+    );
+    if (!ok || !mounted) return;
+    final done = await NativeBridge.requestPinShortcut();
+    if (!mounted) return;
+    if (done) {
+      showInfo(context, 'Shortcut request sent to your launcher.');
+    } else {
+      showError(context, "Your launcher doesn't support pinned shortcuts.");
+    }
   }
 
   @override
@@ -48,15 +91,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         final granted = _controller.rootStatus == RootStatus.granted;
         return Scaffold(
           appBar: AppBar(
-            title: Text(granted ? _titles[_tab] : 'Kernel Manager'),
+            title: Text(granted ? _titles[_tab] : 'Modules Manager'),
             actions: [
               if (_controller.availableUpdate != null)
+                _UpdatePill(onTap: () => _showUpdateDialog(context, _controller)),
+              if (granted)
                 IconButton(
-                  icon: const Icon(Icons.system_update),
-                  tooltip: 'Update available',
-                  onPressed: () => _showUpdateDialog(context, _controller),
+                  icon: const Icon(Icons.add_to_home_screen_outlined),
+                  tooltip: 'Pin shortcut',
+                  onPressed: _pinShortcut,
                 ),
-              _OverflowMenu(controller: _controller),
+              const SizedBox(width: 4),
             ],
           ),
           body: switch (_controller.rootStatus) {
@@ -66,28 +111,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 spinner: true,
               ),
             RootStatus.denied => _RootDenied(controller: _controller),
-            RootStatus.granted => AnimatedSwitcher(
-                duration: const Duration(milliseconds: 260),
-                switchInCurve: Curves.easeOutCubic,
-                child: _tab == 0
-                    ? OverviewScreen(
-                        key: const ValueKey('overview'),
-                        controller: _controller,
-                      )
-                    : ModulesScreen(
-                        key: const ValueKey('modules'),
-                        controller: _controller,
-                      ),
+            RootStatus.granted => PageView(
+                controller: _pageController,
+                onPageChanged: _onPageChanged,
+                children: [
+                  OverviewScreen(controller: _controller),
+                  ModulesScreen(controller: _controller),
+                ],
               ),
           },
           bottomNavigationBar: granted
               ? NavigationBar(
                   selectedIndex: _tab,
-                  onDestinationSelected: (i) => setState(() => _tab = i),
+                  onDestinationSelected: _goToTab,
+                  labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
                   destinations: const [
                     NavigationDestination(
-                      icon: Icon(Icons.shield_moon_outlined),
-                      selectedIcon: Icon(Icons.shield_moon),
+                      icon: Icon(Icons.home_outlined),
+                      selectedIcon: Icon(Icons.home),
                       label: 'Overview',
                     ),
                     NavigationDestination(
@@ -104,147 +145,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 }
 
-/// The app-bar "⋮" menu: pin a home-screen shortcut, jump to the root manager,
-/// and an About sheet. These used to be documented features with no UI wired
-/// to them — now they live here.
-class _OverflowMenu extends StatelessWidget {
-  const _OverflowMenu({required this.controller});
-
-  final AppController controller;
-
-  Future<void> _pinShortcut(BuildContext context) async {
-    final ok = await NativeBridge.requestPinShortcut();
-    if (!context.mounted) return;
-    if (ok) {
-      showInfo(context, 'Shortcut request sent to your launcher.');
-    } else {
-      showError(context, "Your launcher doesn't support pinned shortcuts.");
-    }
-  }
-
-  Future<void> _openRootManager(BuildContext context) async {
-    final ok = await NativeBridge.openRootManager();
-    if (!context.mounted) return;
-    if (!ok) {
-      showError(context, 'No KernelSU / APatch / Magisk manager found.');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      tooltip: 'More',
-      onSelected: (value) {
-        switch (value) {
-          case 'pin':
-            _pinShortcut(context);
-          case 'root':
-            _openRootManager(context);
-          case 'about':
-            showAboutSheet(context);
-        }
-      },
-      itemBuilder: (context) => const [
-        PopupMenuItem(
-          value: 'pin',
-          child: ListTile(
-            leading: Icon(Icons.add_to_home_screen_outlined),
-            title: Text('Pin shortcut'),
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
-        PopupMenuItem(
-          value: 'root',
-          child: ListTile(
-            leading: Icon(Icons.admin_panel_settings_outlined),
-            title: Text('Open root manager'),
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
-        PopupMenuItem(
-          value: 'about',
-          child: ListTile(
-            leading: Icon(Icons.info_outline),
-            title: Text('About'),
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-Future<void> showAboutSheet(BuildContext context) async {
-  final info = await PackageInfo.fromPlatform();
-  if (!context.mounted) return;
-  final scheme = Theme.of(context).colorScheme;
-  final textTheme = Theme.of(context).textTheme;
-  showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    builder: (context) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 4, 24, 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Icon(Icons.shield_moon, color: scheme.onPrimaryContainer),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Picters Kernel Manager',
-                          style: textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 2),
-                      Text('Version ${info.version} (${info.buildNumber})',
-                          style: textTheme.bodySmall
-                              ?.copyWith(color: scheme.onSurfaceVariant)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Controls the out-of-tree NetHunter Wi-Fi injection stack and the '
-              'other OOT kernel drivers over root — everything unloaded by default. '
-              'Use Overview to switch the whole Wi-Fi stack; use Modules for '
-              'per-driver control.',
-              style: textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
 class _RootDenied extends StatelessWidget {
   const _RootDenied({required this.controller});
 
   final AppController controller;
-
-  Future<void> _openRootManager(BuildContext context) async {
-    final ok = await NativeBridge.openRootManager();
-    if (!context.mounted) return;
-    if (!ok) {
-      showError(context, 'No KernelSU / APatch / Magisk manager found.');
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -271,20 +175,13 @@ class _RootDenied extends StatelessWidget {
             Text('Root required', style: textTheme.headlineSmall),
             const SizedBox(height: 12),
             Text(
-              'Grant Superuser access to Picters Kernel Manager in your '
-              'KernelSU, APatch or Magisk manager, then come back — the app '
-              'unlocks on its own.',
+              'Grant Superuser access in KernelSU, APatch or Magisk. '
+              'The app unlocks itself once you do.',
               textAlign: TextAlign.center,
               style: textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 28),
             FilledButton.icon(
-              onPressed: () => _openRootManager(context),
-              icon: const Icon(Icons.admin_panel_settings_outlined),
-              label: const Text('Open root manager'),
-            ),
-            const SizedBox(height: 8),
-            TextButton.icon(
               onPressed: rechecking ? null : controller.recheckRoot,
               icon: rechecking
                   ? const SizedBox(
@@ -368,6 +265,77 @@ void _showUpdateDialog(BuildContext context, AppController controller) {
   );
 }
 
+/// An attention-grabbing "Update" chip for the app bar — a filled accent pill
+/// that gently pulses (scale + glow) so a pending update is impossible to miss,
+/// unlike the plain icon it replaces.
+class _UpdatePill extends StatefulWidget {
+  const _UpdatePill({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_UpdatePill> createState() => _UpdatePillState();
+}
+
+class _UpdatePillState extends State<_UpdatePill> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1150),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (context, child) {
+            final t = Curves.easeInOut.transform(_c.value);
+            return Transform.scale(scale: 1 + 0.04 * t, child: child);
+          },
+          child: Material(
+            color: scheme.primary,
+            borderRadius: BorderRadius.circular(20),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                widget.onTap();
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.system_update, size: 17, color: scheme.onPrimary),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Update',
+                      style: TextStyle(
+                        color: scheme.onPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CenterGlyph extends StatelessWidget {
   const _CenterGlyph({
     required this.icon,
@@ -387,10 +355,10 @@ class _CenterGlyph extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (spinner)
-            const CircularProgressIndicator(strokeWidth: 2.5)
+            MorphingPolygon(size: 52, color: scheme.primary)
           else
             Icon(icon, color: scheme.onSurfaceVariant, size: 48),
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
           Text(title, style: TextStyle(color: scheme.onSurfaceVariant)),
         ],
       ),
