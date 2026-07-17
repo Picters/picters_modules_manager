@@ -349,7 +349,7 @@ class _ModuleGroupState extends State<_ModuleGroup> {
         modules.any((m) => controller.moduleErrors.containsKey(m.name));
     final active = on > 0;
 
-    return Card.outlined(
+    return RepaintBoundary(child: Card.outlined(
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -443,7 +443,7 @@ class _ModuleGroupState extends State<_ModuleGroup> {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 

@@ -163,7 +163,7 @@ class _WifiHeroCard extends StatelessWidget {
     // The shell colour/border animate (AnimatedContainer), and the whole inner
     // block cross-fades + resizes between the status and reboot states, so
     // flipping Stock/Inject/Reboot glides instead of snapping.
-    return _HeroShell(
+    return RepaintBoundary(child: _HeroShell(
       background: background,
       border: Border.all(color: borderColor, width: 1.5),
       child: AnimatedSize(
@@ -194,7 +194,7 @@ class _WifiHeroCard extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 
   Widget _rebootContent(BuildContext context) {

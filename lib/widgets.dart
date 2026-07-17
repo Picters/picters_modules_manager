@@ -216,18 +216,20 @@ class _PulsingDotState extends State<PulsingDot> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: Tween(begin: 0.35, end: 1.0)
-          .animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
-      child: Container(
-        width: widget.size,
-        height: widget.size,
-        decoration: BoxDecoration(
-          color: widget.color,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(color: widget.color.withValues(alpha: 0.6), blurRadius: 6),
-          ],
+    return RepaintBoundary(
+      child: FadeTransition(
+        opacity: Tween(begin: 0.35, end: 1.0)
+            .animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
+        child: Container(
+          width: widget.size,
+          height: widget.size,
+          decoration: BoxDecoration(
+            color: widget.color,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(color: widget.color.withValues(alpha: 0.6), blurRadius: 6),
+            ],
+          ),
         ),
       ),
     );
@@ -506,7 +508,7 @@ class _PolygonPainter extends CustomPainter {
   // The shapes it cycles through, by lobe count.
   static const _lobes = <int>[3, 4, 5, 6, 4];
   static const _amp = 0.17; // how pronounced the corners read
-  static const _steps = 150;
+  static const _steps = 72; // enough for a smooth ≤34px glyph; half the per-frame trig
 
   @override
   void paint(Canvas canvas, Size size) {
