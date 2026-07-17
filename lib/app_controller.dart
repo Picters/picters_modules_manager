@@ -240,12 +240,29 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  // Held true while a page transition animates: a poll landing mid-swipe
+  // would notifyListeners → rebuild both screens on that frame, stalling the
+  // nav-bar/page animation. Set via [setPollPaused] from the shell.
+  bool _pollPaused = false;
+
+  void setPollPaused(bool value) {
+    if (_pollPaused == value) return;
+    _pollPaused = value;
+    // Catch up once the transition ends — non-force so that if another scroll
+    // starts immediately, this scan is dropped instead of rebuilding mid-swipe.
+    if (!value && !_disposed) _pollOnce();
+  }
+
   Future<void> _pollOnce({bool force = false}) async {
     if (!_foreground && !force) return;
+    if (_pollPaused && !force) return;
     if (_polling || wifiBusy || moduleBusy.isNotEmpty) return;
     _polling = true;
     try {
       final next = await _repo.scan();
+      // Dropped if a transition began while the scan was in flight — the
+      // resume-time forced poll will pick the change back up.
+      if (_pollPaused && !force) return;
       final changed = next.fingerprint != _lastFingerprint;
       if (force || changed) {
         _lastFingerprint = next.fingerprint;

@@ -16,12 +16,8 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-/// Default PageScrollPhysics uses an underdamped spring, so a lazy swipe can
-/// overshoot and oscillate before settling — each bounce crosses the
-/// page-index threshold and re-fires onPageChanged, which is what read as
-/// both "slow to finish" and "nav bar stutters" (its selection indicator
-/// re-animates on every bounce). A critically damped spring settles once,
-/// fast, with no overshoot.
+/// Critically damped page spring — settles once with no overshoot, unlike
+/// the default underdamped one that oscillates and re-fires onPageChanged.
 class _SnappyPagePhysics extends PageScrollPhysics {
   const _SnappyPagePhysics({super.parent});
 
@@ -40,11 +36,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final PageController _pageController = PageController();
   int _tab = 0;
 
-  // Mirrors just the two controller fields the app bar/nav bar/body switch
-  // actually need, updated only when they change — decouples this shell
-  // (and the nav bar's own selection animation) from the 1s poll tick.
-  // OverviewScreen/ModulesScreen each own their own AnimatedBuilder for
-  // their live content, so this shell doesn't need to rebuild for that.
+  // Only the fields the shell chrome needs, so the 1s poll doesn't rebuild
+  // the whole Scaffold — the two screens have their own AnimatedBuilders.
   RootStatus _rootStatus = RootStatus.checking;
   bool _hasUpdate = false;
 
@@ -97,9 +90,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
         )
-        // Only the latest animation clears the flag — an overlapping older
-        // one finishing late must not re-arm the swipe haptic early and
-        // double-fire it.
+        // Only the latest animation clears the flag, so a stale one can't
+        // re-arm the swipe haptic early.
         .then((_) {
           if (gen == _pageAnimGen) _programmaticPage = false;
         });
@@ -155,17 +147,28 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           spinner: true,
         ),
         RootStatus.denied => _RootDenied(controller: _controller),
-        RootStatus.granted => PageView(
-          controller: _pageController,
-          physics: const _SnappyPagePhysics(),
-          onPageChanged: _onPageChanged,
-          // Each page its own compositor layer: sliding between them is
-          // then a cheap layer translate instead of repainting both heavy
-          // screens on every frame of the transition.
-          children: [
-            RepaintBoundary(child: OverviewScreen(controller: _controller)),
-            RepaintBoundary(child: ModulesScreen(controller: _controller)),
-          ],
+        // Pause the poll while a page scroll is in flight (swipe or tap-driven
+        // animate) — a mid-transition rebuild is what stalled the animation.
+        RootStatus.granted => NotificationListener<ScrollNotification>(
+          onNotification: (n) {
+            if (n is ScrollStartNotification) {
+              _controller.setPollPaused(true);
+            } else if (n is ScrollEndNotification) {
+              _controller.setPollPaused(false);
+            }
+            return false;
+          },
+          child: PageView(
+            controller: _pageController,
+            physics: const _SnappyPagePhysics(),
+            onPageChanged: _onPageChanged,
+            // Each page in its own layer, so a swipe just translates it
+            // instead of repainting both screens every frame.
+            children: [
+              RepaintBoundary(child: OverviewScreen(controller: _controller)),
+              RepaintBoundary(child: ModulesScreen(controller: _controller)),
+            ],
+          ),
         ),
       },
       bottomNavigationBar: granted

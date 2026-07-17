@@ -524,7 +524,7 @@ class _AdapterRow extends StatelessWidget {
     if (busy) {
       trailing = MorphingPolygon(
         key: const ValueKey('busy'),
-        size: 24,
+        size: 32,
         color: scheme.primary,
       );
     } else if (loaded) {
@@ -532,7 +532,7 @@ class _AdapterRow extends StatelessWidget {
         Icons.check_circle,
         key: const ValueKey('loaded'),
         color: scheme.primary,
-        size: 24,
+        size: 32,
       );
     } else {
       trailing = FilledButton.tonal(
