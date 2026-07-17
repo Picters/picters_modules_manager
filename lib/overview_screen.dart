@@ -21,7 +21,8 @@ class OverviewScreen extends StatelessWidget {
       final ok = await confirmAction(
         context,
         title: 'Switch to Inject mode?',
-        message: 'This unloads the stock Wi-Fi stack and loads the injection '
+        message:
+            'This unloads the stock Wi-Fi stack and loads the injection '
             'stack for monitor mode and packet injection. Stock Wi-Fi can only '
             'be restored by rebooting the device.',
         confirmLabel: 'Switch',
@@ -48,7 +49,8 @@ class OverviewScreen extends StatelessWidget {
     final ok = await confirmAction(
       context,
       title: 'Reboot now?',
-      message: 'Stock Wi-Fi can only be restored by a full reboot. The device '
+      message:
+          'Stock Wi-Fi can only be restored by a full reboot. The device '
           'will restart immediately.',
       confirmLabel: 'Reboot',
       destructive: true,
@@ -113,9 +115,11 @@ class OverviewScreen extends StatelessWidget {
                                   _AdapterRow(
                                     adapter: adapters[i],
                                     state: state,
-                                    busy: controller.moduleBusy
-                                        .contains(adapters[i].match!.driver),
-                                    onLoad: () => _loadAdapter(context, adapters[i]),
+                                    busy: controller.moduleBusy.contains(
+                                      adapters[i].match!.driver,
+                                    ),
+                                    onLoad: () =>
+                                        _loadAdapter(context, adapters[i]),
                                   ),
                                 ],
                               ),
@@ -145,7 +149,11 @@ class OverviewScreen extends StatelessWidget {
 /// non-Wi-Fi module on Android startup. Off by default — nothing loads at
 /// boot until the user opts in here.
 class _BootLoadCard extends StatelessWidget {
-  const _BootLoadCard({required this.enabled, required this.busy, required this.onChanged});
+  const _BootLoadCard({
+    required this.enabled,
+    required this.busy,
+    required this.onChanged,
+  });
 
   final bool enabled;
   final bool busy;
@@ -165,7 +173,9 @@ class _BootLoadCard extends StatelessWidget {
               )
             : Icon(Icons.flash_on, color: scheme.onSurfaceVariant),
         title: const Text('Load modules on boot'),
-        subtitle: const Text('Auto-loads every module except Wi-Fi when the device starts.'),
+        subtitle: const Text(
+          'Auto-loads every module except Wi-Fi when the device starts.',
+        ),
         value: enabled,
         onChanged: busy ? null : onChanged,
       ),
@@ -201,47 +211,54 @@ class _WifiHeroCard extends StatelessWidget {
     } else {
       background = inj
           ? Color.alphaBlend(
-              scheme.primary.withValues(alpha: 0.09), scheme.surfaceContainerHigh)
+              scheme.primary.withValues(alpha: 0.09),
+              scheme.surfaceContainerHigh,
+            )
           : scheme.surfaceContainerHigh;
-      borderColor =
-          inj ? scheme.primary.withValues(alpha: 0.45) : Colors.transparent;
+      borderColor = inj
+          ? scheme.primary.withValues(alpha: 0.45)
+          : Colors.transparent;
     }
 
     // The shell colour/border animate (AnimatedContainer), and the whole inner
     // block cross-fades + resizes between the status and reboot states, so
     // flipping Stock/Inject/Reboot glides instead of snapping.
-    return RepaintBoundary(child: _HeroShell(
-      background: background,
-      border: Border.all(color: borderColor, width: 1.5),
-      child: AnimatedSize(
-        duration: const Duration(milliseconds: 340),
-        curve: Curves.easeOutCubic,
-        alignment: Alignment.topCenter,
-        child: AnimatedSwitcher(
+    return RepaintBoundary(
+      child: _HeroShell(
+        background: background,
+        border: Border.all(color: borderColor, width: 1.5),
+        child: AnimatedSize(
           duration: const Duration(milliseconds: 340),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (child, animation) => FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.06),
-                end: Offset.zero,
-              ).animate(animation),
-              child: child,
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 340),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.06),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
             ),
-          ),
-          layoutBuilder: (currentChild, previousChildren) => Stack(
-            alignment: Alignment.topCenter,
-            children: [...previousChildren, ?currentChild],
-          ),
-          child: KeyedSubtree(
-            key: ValueKey(needsReboot ? 'reboot' : 'status'),
-            child: needsReboot ? _rebootContent(context) : _statusContent(context),
+            layoutBuilder: (currentChild, previousChildren) => Stack(
+              alignment: Alignment.topCenter,
+              children: [...previousChildren, ?currentChild],
+            ),
+            child: KeyedSubtree(
+              key: ValueKey(needsReboot ? 'reboot' : 'status'),
+              child: needsReboot
+                  ? _rebootContent(context)
+                  : _statusContent(context),
+            ),
           ),
         ),
       ),
-    ));
+    );
   }
 
   Widget _rebootContent(BuildContext context) {
@@ -265,12 +282,16 @@ class _WifiHeroCard extends StatelessWidget {
                   Text(
                     'Reboot needed',
                     style: textTheme.titleMedium?.copyWith(
-                        color: scheme.onSurface, fontWeight: FontWeight.w700),
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 3),
                   Text(
                     'Reboot to restore stock Wi-Fi.',
-                    style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -296,7 +317,11 @@ class _WifiHeroCard extends StatelessWidget {
     final inj = mode == WifiMode.inject;
     final (icon, title, subtitle) = switch (mode) {
       WifiMode.stock => (Icons.wifi, 'Stock Wi-Fi', 'Built-in Wi-Fi is on.'),
-      WifiMode.inject => (Icons.security, 'Inject Wi-Fi', 'Injection stack loaded.'),
+      WifiMode.inject => (
+        Icons.security,
+        'Inject Wi-Fi',
+        'Injection stack loaded.',
+      ),
       WifiMode.off => (Icons.wifi_off, 'Wi-Fi is off', 'No stack loaded.'),
     };
     return Column(
@@ -339,7 +364,9 @@ class _WifiHeroCard extends StatelessWidget {
                           child: Text(
                             title,
                             style: textTheme.titleMedium?.copyWith(
-                                color: scheme.onSurface, fontWeight: FontWeight.w700),
+                              color: scheme.onSurface,
+                              fontWeight: FontWeight.w700,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -356,7 +383,9 @@ class _WifiHeroCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                      style: textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -415,7 +444,11 @@ class _WifiSegmented extends StatelessWidget {
 /// [AnimatedContainer] so the background and accent border glide when the
 /// Wi-Fi mode changes.
 class _HeroShell extends StatelessWidget {
-  const _HeroShell({required this.child, required this.background, this.border});
+  const _HeroShell({
+    required this.child,
+    required this.background,
+    this.border,
+  });
 
   final Widget child;
   final Color background;
@@ -514,17 +547,31 @@ class _AdapterRow extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       leading: CircleAvatar(
         backgroundColor: scheme.surfaceContainerHighest,
-        child: Icon(Icons.wifi_tethering, color: scheme.onSurfaceVariant, size: 20),
+        child: Icon(
+          Icons.wifi_tethering,
+          color: scheme.onSurfaceVariant,
+          size: 20,
+        ),
       ),
       title: Text(adapter.device.displayName, overflow: TextOverflow.ellipsis),
       subtitle: Text('${adapter.device.idPair} · ${match.driver}'),
-      trailing: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 280),
-        transitionBuilder: (child, animation) => ScaleTransition(
-          scale: animation,
-          child: FadeTransition(opacity: animation, child: child),
+      // Fixed width regardless of state (button vs. icon) — otherwise the
+      // trailing slot itself resizes once the cross-fade finishes, snapping
+      // the icon over to the right as the wider "Load" button's space is
+      // reclaimed.
+      trailing: SizedBox(
+        width: 92,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 280),
+            transitionBuilder: (child, animation) => ScaleTransition(
+              scale: animation,
+              child: FadeTransition(opacity: animation, child: child),
+            ),
+            child: trailing,
+          ),
         ),
-        child: trailing,
       ),
     );
   }
