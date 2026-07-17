@@ -520,20 +520,19 @@ class _AdapterRow extends StatelessWidget {
     final match = adapter.match!;
     final loaded = state.modules.any((m) => m.name == match.driver && m.loaded);
 
-    // Busy and loaded share the same 24px footprint + right padding, so the
-    // spinner-to-checkmark cross-fade doesn't jump the trailing slot's width.
     final Widget trailing;
     if (busy) {
-      trailing = Padding(
+      trailing = MorphingPolygon(
         key: const ValueKey('busy'),
-        padding: const EdgeInsets.only(right: 6),
-        child: MorphingPolygon(size: 24, color: scheme.primary),
+        size: 24,
+        color: scheme.primary,
       );
     } else if (loaded) {
-      trailing = Padding(
+      trailing = Icon(
+        Icons.check_circle,
         key: const ValueKey('loaded'),
-        padding: const EdgeInsets.only(right: 6),
-        child: Icon(Icons.check_circle, color: scheme.primary, size: 24),
+        color: scheme.primary,
+        size: 24,
       );
     } else {
       trailing = FilledButton.tonal(
@@ -555,16 +554,13 @@ class _AdapterRow extends StatelessWidget {
       ),
       title: Text(adapter.device.displayName, overflow: TextOverflow.ellipsis),
       subtitle: Text('${adapter.device.idPair} · ${match.driver}'),
-      // Fixed width regardless of state (button vs. icon) so the slot never
-      // resizes, and a right-aligned layoutBuilder so the outgoing "Load"
-      // button and the incoming spinner/checkmark overlap on their RIGHT
-      // edge — otherwise the switcher's default centre-alignment drops the
-      // 24px spinner in the middle of the button's old width, then snaps it
-      // right when the button is removed.
+      // Fixed-width slot with everything CENTRED: the spinner and checkmark
+      // land dead-centre on the "Load" button's footprint and stay there —
+      // the slot never resizes, and the switcher's default centre-alignment
+      // keeps the outgoing/incoming children concentric, so nothing shifts.
       trailing: SizedBox(
-        width: 92,
-        child: Align(
-          alignment: Alignment.centerRight,
+        width: 84,
+        child: Center(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 280),
             switchInCurve: Curves.easeOutCubic,
@@ -575,10 +571,6 @@ class _AdapterRow extends StatelessWidget {
                 scale: Tween<double>(begin: 0.85, end: 1.0).animate(animation),
                 child: child,
               ),
-            ),
-            layoutBuilder: (currentChild, previousChildren) => Stack(
-              alignment: Alignment.centerRight,
-              children: [...previousChildren, ?currentChild],
             ),
             child: trailing,
           ),
