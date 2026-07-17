@@ -15,11 +15,8 @@ class ShellResult {
 
   bool get ok => exitCode == 0;
 
-  /// Best-effort human-readable failure detail for an error banner. Skips bare
-  /// Java stack frames ("at pkg.Class.method(...)") and Binder plumbing lines —
-  /// those are never the actual reason, they're just the tail of a trace that
-  /// `pm`/`system_server` dumps on failure. The meaningful line (a `Failure
-  /// [...]`, `SecurityException: ...`, etc.) sits above them.
+  /// Best-effort failure detail for an error banner — skips Java stack
+  /// frames and Binder plumbing lines, keeping the actual reason above them.
   String get errorSummary {
     final lines = stdout
         .split('\n')
@@ -40,14 +37,9 @@ class ShellResult {
   }
 }
 
-/// A single long-lived `su` process. Instead of spawning `su` per command
-/// (which is what makes 1-second polling expensive and noisy in the SELinux
-/// audit log), we keep one root shell open and pipe each script into it,
-/// framed by a unique end-marker so we know when its output is complete.
-///
-/// Commands are serialized through a Future chain so two callers never
-/// interleave on the shared stdin/stdout. The session lazily (re)starts if the
-/// shell ever dies.
+/// A single long-lived `su` process, fed one script at a time (framed by an
+/// end-marker) instead of spawning `su` per command. Calls are serialized
+/// through a Future chain; the session lazily restarts if the shell dies.
 class RootSession {
   RootSession._();
   static final RootSession instance = RootSession._();
@@ -222,11 +214,8 @@ class StreamQueue<T> {
 /// service when enabled and connected (concurrent, no head-of-line blocking),
 /// and otherwise — or on any Binder failure — through the persistent `su` pipe.
 class RootShell {
-  /// Route root commands through the Binder root service instead of the
-  /// serialized `su` pipe. Off by default: the Binder path is fully implemented
-  /// and compiled in, but can't be verified on a device from the dev host, so
-  /// the shipped app uses the proven pipe. Flip to `true` to enable it — the
-  /// pipe stays wired as an automatic fallback either way.
+  /// Route root commands through the Binder root service; the `su` pipe
+  /// stays wired as an automatic fallback either way.
   static const bool useBinderService = true;
 
   static Future<bool> checkRoot() => RootSession.instance.checkRoot();

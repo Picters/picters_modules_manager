@@ -64,12 +64,8 @@ class UpdateChecker {
     }
   }
 
-  /// Downloads the release APK into the app's own cache dir, retrying a couple
-  /// of times on a transient network failure and validating the result before
-  /// handing it back — a half-downloaded file, or an HTML/JSON error body saved
-  /// under the .apk name, would otherwise reach `pm install` and fail
-  /// cryptically. Root (used for the actual `pm install`) can read app-private
-  /// storage fine, so this never needs public/shared storage.
+  /// Downloads the release APK into the app's cache dir, retrying on
+  /// transient failures and validating the result before handing it back.
   Future<File> download(String url,
       {void Function(int received, int total)? onProgress}) async {
     final file = File('${Directory.systemTemp.path}/pmm_update.apk');

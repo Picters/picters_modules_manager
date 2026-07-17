@@ -306,11 +306,8 @@ class CardDivider extends StatelessWidget {
   }
 }
 
-/// Fades + slides a child in once, the first time it's mounted. Reused for
-/// every top-level card/section so the screen feels like it's building
-/// itself in rather than popping into place — plays again whenever the
-/// widget gets a fresh element (e.g. a list item shifting position), which
-/// is the desired "appearing" effect for newly-plugged adapters too.
+/// Fades + slides a child in once, on first mount — used for every
+/// top-level card/section.
 class FadeInSlide extends StatefulWidget {
   const FadeInSlide({
     super.key,

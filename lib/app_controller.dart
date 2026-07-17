@@ -82,12 +82,8 @@ class AppController extends ChangeNotifier {
           notifyListeners();
         },
       );
-      // Copy the APK into /data/local/tmp — a spot the platform installer
-      // (installd, running as system, not root) can actually read, unlike the
-      // app's private cache — then install by path. `-d` allows a same/older
-      // versionCode so the update isn't refused as a "downgrade". A signature
-      // mismatch (e.g. a locally debug-signed build vs the release key) can't
-      // be auto-resolved and is reported clearly instead.
+      // installd can't read the app's private cache, so stage the APK in
+      // /data/local/tmp first; `-d` allows installing over a newer versionCode.
       const dest = '/data/local/tmp/pmm_update.apk';
       final result = await RootShell.run(
         "cp '${apk.path}' '$dest' && chmod 644 '$dest' && "
@@ -111,10 +107,7 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  /// Turns a failed `pm install` into a message that names the actual reason,
-  /// mapping the common INSTALL_FAILED_* codes to plain language. Without this
-  /// the UI showed whatever line `pm` printed last — usually a bare Binder
-  /// stack frame — which told the user nothing.
+  /// Maps common INSTALL_FAILED_* codes to plain language.
   String _installErrorMessage(ShellResult r) {
     final lower = r.stdout.toLowerCase();
     if (lower.contains('signatures do not match') ||
@@ -252,14 +245,8 @@ class AppController extends ChangeNotifier {
   /// "didn't work".
   String? lastWifiSwitchDiagnostics;
 
-  /// True when the last failed switch was specifically the
-  /// vendor-module-won't-reload case: on this hardware, once qca_cld3's PCIe
-  /// link drops on rmmod it stays down (config space reads back device ID
-  /// 0xffff) — confirmed on-device that neither a plain unbind/bind nor a
-  /// real FLR reset of the PCI function brings it back, only the
-  /// bootloader's own cold-boot power sequencing does. So this isn't a
-  /// "keep retrying" case — the UI shows a persistent reboot prompt instead
-  /// of the normal hero card until the user reboots or switches away again.
+  /// True once qca_cld3's PCIe link has dropped for good — only a reboot
+  /// brings it back, so the UI shows a persistent reboot prompt.
   bool lastSwitchNeedsReboot = false;
 
   /// Set the instant a switch is requested and cleared when it settles, so
@@ -272,14 +259,8 @@ class AppController extends ChangeNotifier {
   Future<String?> setWifiMode(WifiMode target) async {
     if (wifiBusy) return null;
 
-    // Restoring the stock vendor stack is impossible without a cold reboot on
-    // this hardware: once qca_cld3 is torn down the WLAN PCIe link stays down
-    // (config space reads back 0xffff within ~2s; no unbind/bind or FLR reset
-    // brings it back — only the bootloader's cold-boot power sequencing does).
-    // So there's nothing to "switch" to and no point spinning through a doomed
-    // teardown — go straight to the honest reboot prompt. A reboot restores
-    // stock cleanly: every OOT module unloads on boot and the vendor stack
-    // comes up normally.
+    // No software path back to stock on this hardware — go straight to the
+    // reboot prompt instead of attempting a doomed teardown.
     if (target == WifiMode.stock) {
       lastWifiSwitchDiagnostics = null;
       lastSwitchNeedsReboot = true;

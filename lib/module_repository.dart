@@ -116,18 +116,9 @@ class ModuleRepository {
 
   // ── High-level Wi-Fi mode switch (the main screen) ──────────────────────
 
-  /// Result of a mode switch: [ok] plus a human message for the UI.
-  ///
-  /// There are TWO separate cfg80211.ko builds on this device: ours (shipped
-  /// in system/lib/modules, ABI-matched to the injection drivers) and the
-  /// vendor's (loaded at boot from /vendor or /vendor_dlkm, ABI-matched to
-  /// qca_cld3 — different CRCs, see project memory
-  /// project_injection_cfg80211_architecture.md). Removing qca_cld3 does NOT
-  /// remove the vendor cfg80211 module itself — it stays loaded. The old
-  /// version of this script only checked "is *a* cfg80211 loaded" and skipped
-  /// insmod'ing ours if so, which meant it silently never actually switched
-  /// once the vendor one was resident. Fixed: unconditionally evict whatever
-  /// cfg80211 is currently there before loading ours.
+  /// Two separate cfg80211.ko builds exist on this device (ours vs the
+  /// vendor's, different CRCs); always evict whatever's loaded before
+  /// insmod'ing ours, since removing qca_cld3 alone doesn't remove it.
   Future<ShellResult> switchToInject(List<ModuleInfo> modules) {
     final hasCfg = modules.any((m) => m.name == 'cfg80211');
     if (!hasCfg) {
@@ -139,26 +130,11 @@ class ModuleRepository {
     b.writeln('  sleep 2');
     b.writeln('  rmmod $_vendorWifi 2>/dev/null');
     b.writeln('fi');
-    // Whatever cfg80211 is loaded right now (vendor's, almost certainly) has
-    // to go before ours can take its place — same module name, can't coexist.
-    // mac80211 registers itself as a cfg80211 client at insmod time, so
-    // cfg80211 stays EBUSY (rmmod fails) as long as ANY mac80211 — vendor's
-    // or ours — is still resident, even if mac80211 itself has zero
-    // dependents right now. Confirmed on-device: without this, rmmod
-    // cfg80211 exits 1 every time, our insmod then fails "File exists"
-    // against the still-resident (vendor) cfg80211, and the old grep-based
-    // success check couldn't tell "a cfg80211 is loaded" from "OUR cfg80211
-    // is loaded" — so it reported OK_INJECT while nothing had actually switched,
-    // and mac80211/the adapter drivers loaded against the wrong cfg80211
-    // next, which is what threw "disagrees about version of symbol".
+    // mac80211 must go first — it pins cfg80211 as EBUSY while resident.
     b.writeln('rmmod mac80211 2>/dev/null');
     b.writeln('rmmod cfg80211 2>/dev/null');
-    // insmod's own exit status is the only reliable success signal — unlike
-    // grepping /proc/modules for the name "cfg80211", it can't be fooled by
-    // a stale module of the same name still being resident. Retry a few
-    // times a second apart for the transient teardown race, re-attempting
-    // the rmmods each time in case the previous insmod's "File exists"
-    // failure left something to clear out.
+    // Retry a few times for the teardown race; insmod's exit code is the
+    // only trustworthy success signal here.
     b.writeln('i=0');
     b.writeln('LOADED_OURS=0');
     b.writeln('while [ "\$i" -lt 3 ]; do');
@@ -183,14 +159,8 @@ class ModuleRepository {
     return RootShell.run(b.toString());
   }
 
-  /// Restoring the stock vendor Wi-Fi is intentionally NOT attempted in
-  /// software: confirmed on-device, once qca_cld3's rmmod drops the WLAN PCIe
-  /// link the chip's config space reads back 0xffff within ~2s and nothing
-  /// short of a cold reboot brings it back — bouncing the Wi-Fi service, a
-  /// plain PCI unbind/bind, and even a real hardware FLR reset were all tried
-  /// live and none worked. So the UI goes straight to a reboot prompt (a
-  /// reboot restores stock cleanly: OOT modules unload on boot, the vendor
-  /// stack loads normally) and this just performs it.
+  /// Reverting to stock Wi-Fi in software doesn't work — the PCIe link drops
+  /// for good once qca_cld3 unloads, so this just reboots.
   Future<void> reboot() => RootShell.run('reboot', timeout: const Duration(seconds: 3));
 
   /// The dmesg tail any of switchToStock/switchToInject/setLoaded append
@@ -212,13 +182,7 @@ class ModuleRepository {
   Future<ShellResult> setLoaded(ModuleInfo module, bool wantLoaded) {
     if (wantLoaded) {
       if (module.name == 'cfg80211') {
-        // Loading cfg80211 by hand still needs the vendor teardown first —
-        // and the vendor's OWN cfg80211.ko has to come out too (same module
-        // name as ours, can't coexist), or this insmod fails with EEXIST.
-        // mac80211 has to go first: it registers as a cfg80211 client at
-        // insmod time, so cfg80211 stays EBUSY on rmmod while ANY mac80211
-        // is still resident, even one with zero dependents of its own —
-        // see switchToInject's doc for how this bit us on-device.
+        // Same vendor-teardown + mac80211-first dance as switchToInject.
         final b = StringBuffer();
         b.writeln("if grep -q '^$_vendorWifi ' /proc/modules; then");
         b.writeln('  svc wifi disable 2>/dev/null');
@@ -296,21 +260,10 @@ class ModuleRepository {
     return RegExp(r'CHAIN_FAIL:(\S+)').firstMatch(r.stdout)?.group(1);
   }
 
-  /// insmod, with a couple of retries a second apart. Fixes a real race: right
-  /// after cfg80211/mac80211 come up they're already visible in /proc/modules
-  /// (so the precondition check above passes), but the wireless core can need a
-  /// moment longer before it's actually ready to accept a new adapter
-  /// registering against it — a driver probing too early gets "Invalid
-  /// argument" from insmod even though nothing is really wrong; the exact
-  /// same insmod succeeds a second later. Retrying here means the user
-  /// doesn't have to notice that and retry by hand (as happened before this
-  /// fix — toggling Inject mode off/on again just gave it more time to
-  /// settle before the next attempt).
-  ///
-  /// The dmesg tail is deliberately NOT collected here — it's fetched lazily by
-  /// [moduleDmesg] only if the user taps the error icon, so a failed toggle
-  /// returns fast and never holds the (serialized) root shell blocking the next
-  /// module the user tries to toggle.
+  /// Retries insmod a couple times a second apart — the wireless core can
+  /// need a moment after cfg80211/mac80211 come up before it'll accept a new
+  /// adapter. dmesg is fetched lazily via [moduleDmesg], not collected here,
+  /// so a failed toggle doesn't block the next one.
   String _insmodWithRetryScript(ModuleInfo module) {
     final path = "$kModulesDir/${module.name}.ko";
     final b = StringBuffer();

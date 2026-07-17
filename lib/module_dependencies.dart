@@ -1,29 +1,16 @@
 /// Module dependency graph and load/unload order resolution.
 ///
-/// `insmod` (unlike `modprobe`) does NOT pull in a module's dependencies, and on
-/// this device there is no `modules.dep`, so `modprobe` itself can't run
-/// (`Failed to scan dir /lib/modules/`). That means loading e.g. `rtl8192cu`
-/// on its own fails with "Unknown symbol rtl_usb_probe" because `rtl_usb` /
-/// `rtlwifi` aren't up yet. So we resolve the order ourselves.
-///
-/// The map below is each module's direct `depends:` list, read straight off the
-/// shipped `.ko` set with `modinfo -F depends` (same source of truth as
-/// [kKnownAdapters] / the category table). Names are on-disk basenames, exactly
-/// as they appear as `<name>.ko` and in the modinfo output.
+/// `insmod` doesn't pull in dependencies and there's no `modules.dep` on this
+/// device, so we resolve load order ourselves from each module's `modinfo -F
+/// depends` output.
 library;
 
-/// cfg80211 + mac80211 — the injection Wi-Fi core. These are never loaded as an
-/// ordinary dependency: they come up (with the vendor-stack teardown) only via
-/// the Overview screen's Stock/Inject switch. A driver that needs them while
-/// Inject mode is off is a "turn on Inject first" case, not an insmod.
+/// cfg80211 + mac80211 — only ever loaded via the Overview Stock/Inject
+/// switch, never as an ordinary dependency.
 const Set<String> kInjectCore = {'cfg80211', 'mac80211'};
 
-/// Direct dependencies per shipped module. Modules with no OOT dependencies
-/// (or only kernel-builtin ones) are simply absent. Dependency names that
-/// aren't in this project's `.ko` set — `rfkill`, `bluetooth`, `usbnet`, `mii`,
-/// `crc-itu-t`, `eeprom_93cx6`, `pwrseq-core`, `btqca` — are provided
-/// builtin/by the vendor image, so they're left in the lists for fidelity and
-/// filtered out at resolve time against the set of modules we actually ship.
+/// Direct dependencies per shipped module. Deps not in this project's `.ko`
+/// set are vendor/kernel-builtin and get filtered out at resolve time.
 const Map<String, List<String>> kModuleDeps = {
   // ── Wi-Fi: Realtek rtlwifi family ──
   'rtlwifi': ['cfg80211', 'rfkill', 'mac80211'],
