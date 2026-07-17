@@ -555,19 +555,30 @@ class _AdapterRow extends StatelessWidget {
       ),
       title: Text(adapter.device.displayName, overflow: TextOverflow.ellipsis),
       subtitle: Text('${adapter.device.idPair} · ${match.driver}'),
-      // Fixed width regardless of state (button vs. icon) — otherwise the
-      // trailing slot itself resizes once the cross-fade finishes, snapping
-      // the icon over to the right as the wider "Load" button's space is
-      // reclaimed.
+      // Fixed width regardless of state (button vs. icon) so the slot never
+      // resizes, and a right-aligned layoutBuilder so the outgoing "Load"
+      // button and the incoming spinner/checkmark overlap on their RIGHT
+      // edge — otherwise the switcher's default centre-alignment drops the
+      // 24px spinner in the middle of the button's old width, then snaps it
+      // right when the button is removed.
       trailing: SizedBox(
         width: 92,
         child: Align(
           alignment: Alignment.centerRight,
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 280),
-            transitionBuilder: (child, animation) => ScaleTransition(
-              scale: animation,
-              child: FadeTransition(opacity: animation, child: child),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.85, end: 1.0).animate(animation),
+                child: child,
+              ),
+            ),
+            layoutBuilder: (currentChild, previousChildren) => Stack(
+              alignment: Alignment.centerRight,
+              children: [...previousChildren, ?currentChild],
             ),
             child: trailing,
           ),
