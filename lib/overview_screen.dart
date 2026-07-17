@@ -487,6 +487,8 @@ class _AdapterRow extends StatelessWidget {
     final match = adapter.match!;
     final loaded = state.modules.any((m) => m.name == match.driver && m.loaded);
 
+    // Busy and loaded share the same 24px footprint + right padding, so the
+    // spinner-to-checkmark cross-fade doesn't jump the trailing slot's width.
     final Widget trailing;
     if (busy) {
       trailing = Padding(
@@ -495,28 +497,10 @@ class _AdapterRow extends StatelessWidget {
         child: MorphingPolygon(size: 24, color: scheme.primary),
       );
     } else if (loaded) {
-      trailing = Container(
+      trailing = Padding(
         key: const ValueKey('loaded'),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-        decoration: BoxDecoration(
-          color: scheme.primaryContainer,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.check_circle, color: scheme.onPrimaryContainer, size: 16),
-            const SizedBox(width: 3),
-            Text(
-              'active',
-              style: TextStyle(
-                color: scheme.onPrimaryContainer,
-                fontWeight: FontWeight.w600,
-                fontSize: 12.5,
-              ),
-            ),
-          ],
-        ),
+        padding: const EdgeInsets.only(right: 6),
+        child: Icon(Icons.check_circle, color: scheme.primary, size: 24),
       );
     } else {
       trailing = FilledButton.tonal(
