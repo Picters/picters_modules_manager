@@ -45,8 +45,34 @@ class AppController extends ChangeNotifier {
       await _pollOnce(force: true);
       _startTimer();
       unawaited(_checkForUpdate());
+      unawaited(_refreshBootLoadEnabled());
     } else {
       _startRootRecheckTimer();
+    }
+  }
+
+  // ── Boot-time module autoload toggle ─────────────────────────────────────
+
+  bool bootLoadEnabled = false;
+  bool bootLoadBusy = false;
+
+  Future<void> _refreshBootLoadEnabled() async {
+    final v = await _repo.bootLoadEnabled();
+    if (_disposed) return;
+    bootLoadEnabled = v;
+    notifyListeners();
+  }
+
+  Future<void> setBootLoadEnabled(bool value) async {
+    if (bootLoadBusy || bootLoadEnabled == value) return;
+    bootLoadBusy = true;
+    notifyListeners();
+    try {
+      await _repo.setBootLoadEnabled(value);
+      bootLoadEnabled = await _repo.bootLoadEnabled();
+    } finally {
+      bootLoadBusy = false;
+      notifyListeners();
     }
   }
 
@@ -189,6 +215,7 @@ class AppController extends ChangeNotifier {
       await _pollOnce(force: true);
       _startTimer();
       unawaited(_checkForUpdate());
+      unawaited(_refreshBootLoadEnabled());
     } else {
       notifyListeners();
     }
@@ -208,6 +235,7 @@ class AppController extends ChangeNotifier {
         notifyListeners();
         await _pollOnce(force: true);
         _startTimer();
+        unawaited(_refreshBootLoadEnabled());
       }
     });
   }

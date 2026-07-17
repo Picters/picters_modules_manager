@@ -66,6 +66,11 @@ class OverviewScreen extends StatelessWidget {
     if (err != null) showError(context, err);
   }
 
+  Future<void> _setBootLoad(BuildContext context, bool value) async {
+    HapticFeedback.selectionClick();
+    await controller.setBootLoadEnabled(value);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -119,9 +124,51 @@ class OverviewScreen extends StatelessWidget {
                       ),
                     ),
             ),
+            const SizedBox(height: 26),
+            SectionHeader(icon: Icons.settings_outlined, label: 'Startup'),
+            const SizedBox(height: 12),
+            RepaintBoundary(
+              child: _BootLoadCard(
+                enabled: controller.bootLoadEnabled,
+                busy: controller.bootLoadBusy,
+                onChanged: (v) => _setBootLoad(context, v),
+              ),
+            ),
           ],
         );
       },
+    );
+  }
+}
+
+/// Toggles whether the boot-time loader (service.sh) auto-loads every staged
+/// non-Wi-Fi module on Android startup. Off by default — nothing loads at
+/// boot until the user opts in here.
+class _BootLoadCard extends StatelessWidget {
+  const _BootLoadCard({required this.enabled, required this.busy, required this.onChanged});
+
+  final bool enabled;
+  final bool busy;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card.outlined(
+      child: SwitchListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        secondary: busy
+            ? SizedBox(
+                width: 24,
+                height: 24,
+                child: MorphingPolygon(size: 24, color: scheme.primary),
+              )
+            : Icon(Icons.flash_on, color: scheme.onSurfaceVariant),
+        title: const Text('Load modules on boot'),
+        subtitle: const Text('Auto-loads every module except Wi-Fi when the device starts.'),
+        value: enabled,
+        onChanged: busy ? null : onChanged,
+      ),
     );
   }
 }
@@ -440,11 +487,16 @@ class _AdapterRow extends StatelessWidget {
     final match = adapter.match!;
     final loaded = state.modules.any((m) => m.name == match.driver && m.loaded);
 
-    Widget trailing;
+    final Widget trailing;
     if (busy) {
-      trailing = MorphingPolygon(size: 24, color: scheme.primary);
+      trailing = Padding(
+        key: const ValueKey('busy'),
+        padding: const EdgeInsets.only(right: 6),
+        child: MorphingPolygon(size: 24, color: scheme.primary),
+      );
     } else if (loaded) {
       trailing = Container(
+        key: const ValueKey('loaded'),
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
         decoration: BoxDecoration(
           color: scheme.primaryContainer,
@@ -453,7 +505,7 @@ class _AdapterRow extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.bolt, color: scheme.onPrimaryContainer, size: 16),
+            Icon(Icons.check_circle, color: scheme.onPrimaryContainer, size: 16),
             const SizedBox(width: 3),
             Text(
               'active',
@@ -467,7 +519,11 @@ class _AdapterRow extends StatelessWidget {
         ),
       );
     } else {
-      trailing = FilledButton.tonal(onPressed: onLoad, child: const Text('Load'));
+      trailing = FilledButton.tonal(
+        key: const ValueKey('idle'),
+        onPressed: onLoad,
+        child: const Text('Load'),
+      );
     }
 
     return ListTile(
@@ -478,7 +534,14 @@ class _AdapterRow extends StatelessWidget {
       ),
       title: Text(adapter.device.displayName, overflow: TextOverflow.ellipsis),
       subtitle: Text('${adapter.device.idPair} · ${match.driver}'),
-      trailing: trailing,
+      trailing: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 280),
+        transitionBuilder: (child, animation) => ScaleTransition(
+          scale: animation,
+          child: FadeTransition(opacity: animation, child: child),
+        ),
+        child: trailing,
+      ),
     );
   }
 }

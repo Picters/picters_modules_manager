@@ -16,10 +16,37 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
+/// Default PageScrollPhysics uses an underdamped spring, so a lazy swipe can
+/// overshoot and oscillate before settling — each bounce crosses the
+/// page-index threshold and re-fires onPageChanged, which is what read as
+/// both "slow to finish" and "nav bar stutters" (its selection indicator
+/// re-animates on every bounce). A critically damped spring settles once,
+/// fast, with no overshoot.
+class _SnappyPagePhysics extends PageScrollPhysics {
+  const _SnappyPagePhysics({super.parent});
+
+  @override
+  _SnappyPagePhysics applyTo(ScrollPhysics? ancestor) {
+    return _SnappyPagePhysics(parent: buildParent(ancestor));
+  }
+
+  @override
+  SpringDescription get spring =>
+      SpringDescription.withDampingRatio(mass: 0.4, stiffness: 220, ratio: 1.0);
+}
+
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final AppController _controller = AppController(ModuleRepository());
   final PageController _pageController = PageController();
   int _tab = 0;
+
+  // Mirrors just the two controller fields the app bar/nav bar/body switch
+  // actually need, updated only when they change — decouples this shell
+  // (and the nav bar's own selection animation) from the 1s poll tick.
+  // OverviewScreen/ModulesScreen each own their own AnimatedBuilder for
+  // their live content, so this shell doesn't need to rebuild for that.
+  RootStatus _rootStatus = RootStatus.checking;
+  bool _hasUpdate = false;
 
   static const _titles = ['Overview', 'Modules'];
 
@@ -27,15 +54,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _controller.addListener(_handleControllerChanged);
     _controller.init();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _controller.removeListener(_handleControllerChanged);
     _pageController.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  void _handleControllerChanged() {
+    final hasUpdate = _controller.availableUpdate != null;
+    if (_controller.rootStatus != _rootStatus || hasUpdate != _hasUpdate) {
+      setState(() {
+        _rootStatus = _controller.rootStatus;
+        _hasUpdate = hasUpdate;
+      });
+    }
   }
 
   @override
@@ -44,22 +83,30 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   bool _programmaticPage = false;
+  int _pageAnimGen = 0;
 
   void _goToTab(int i) {
     if (i == _tab) return;
     HapticFeedback.selectionClick();
+    final gen = ++_pageAnimGen;
     _programmaticPage = true;
     setState(() => _tab = i);
     _pageController
         .animateToPage(
           i,
-          duration: const Duration(milliseconds: 360),
-          curve: Curves.easeOutCubic,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
         )
-        .then((_) => _programmaticPage = false);
+        // Only the latest animation clears the flag — an overlapping older
+        // one finishing late must not re-arm the swipe haptic early and
+        // double-fire it.
+        .then((_) {
+          if (gen == _pageAnimGen) _programmaticPage = false;
+        });
   }
 
   void _onPageChanged(int i) {
+    if (i == _tab) return;
     // A finger-swipe (not a nav-bar tap) gets its own haptic tick.
     if (!_programmaticPage) HapticFeedback.selectionClick();
     setState(() => _tab = i);
@@ -85,62 +132,57 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        final granted = _controller.rootStatus == RootStatus.granted;
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(granted ? _titles[_tab] : 'Modules Manager'),
-            actions: [
-              if (_controller.availableUpdate != null)
-                _UpdatePill(onTap: () => _showUpdateDialog(context, _controller)),
-              if (granted)
-                IconButton(
-                  icon: const Icon(Icons.add_to_home_screen_outlined),
-                  tooltip: 'Pin shortcut',
-                  onPressed: _pinShortcut,
-                ),
-              const SizedBox(width: 4),
+    final granted = _rootStatus == RootStatus.granted;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(granted ? _titles[_tab] : 'Modules Manager'),
+        actions: [
+          if (_hasUpdate) _UpdatePill(onTap: () => _showUpdateDialog(context, _controller)),
+          if (granted)
+            IconButton(
+              icon: const Icon(Icons.add_to_home_screen_outlined),
+              tooltip: 'Pin shortcut',
+              onPressed: _pinShortcut,
+            ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: switch (_rootStatus) {
+        RootStatus.checking => const _CenterGlyph(
+            icon: Icons.hourglass_empty,
+            title: 'Checking root access…',
+            spinner: true,
+          ),
+        RootStatus.denied => _RootDenied(controller: _controller),
+        RootStatus.granted => PageView(
+            controller: _pageController,
+            physics: const _SnappyPagePhysics(),
+            onPageChanged: _onPageChanged,
+            children: [
+              OverviewScreen(controller: _controller),
+              ModulesScreen(controller: _controller),
             ],
           ),
-          body: switch (_controller.rootStatus) {
-            RootStatus.checking => const _CenterGlyph(
-                icon: Icons.hourglass_empty,
-                title: 'Checking root access…',
-                spinner: true,
-              ),
-            RootStatus.denied => _RootDenied(controller: _controller),
-            RootStatus.granted => PageView(
-                controller: _pageController,
-                onPageChanged: _onPageChanged,
-                children: [
-                  OverviewScreen(controller: _controller),
-                  ModulesScreen(controller: _controller),
-                ],
-              ),
-          },
-          bottomNavigationBar: granted
-              ? NavigationBar(
-                  selectedIndex: _tab,
-                  onDestinationSelected: _goToTab,
-                  labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-                  destinations: const [
-                    NavigationDestination(
-                      icon: Icon(Icons.home_outlined),
-                      selectedIcon: Icon(Icons.home),
-                      label: 'Overview',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.tune_outlined),
-                      selectedIcon: Icon(Icons.tune),
-                      label: 'Modules',
-                    ),
-                  ],
-                )
-              : null,
-        );
       },
+      bottomNavigationBar: granted
+          ? NavigationBar(
+              selectedIndex: _tab,
+              onDestinationSelected: _goToTab,
+              labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home),
+                  label: 'Overview',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.tune_outlined),
+                  selectedIcon: Icon(Icons.tune),
+                  label: 'Modules',
+                ),
+              ],
+            )
+          : null,
     );
   }
 }
@@ -152,6 +194,13 @@ class _RootDenied extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => _content(context),
+    );
+  }
+
+  Widget _content(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final rechecking = controller.recheckingRoot;

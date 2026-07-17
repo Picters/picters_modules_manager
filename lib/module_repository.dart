@@ -20,6 +20,11 @@ const String _vendorWifi = 'qca_cld3_peach_v2';
 const String _mModules = '___PMM_MODS___';
 const String _mProc = '___PMM_PROC___';
 
+/// Lives outside /data/adb/modules so it survives a Modules pack
+/// reinstall/update — service.sh checks this flag before auto-loading.
+const String kBootConfigDir = '/data/adb/picters_modules_manager';
+const String kBootLoadFlag = '$kBootConfigDir/boot_load_enabled';
+
 /// Thrown before any root command runs when a precondition fails — e.g. loading
 /// an adapter while the injection Wi-Fi stack is off.
 class ModulePrecondition implements Exception {
@@ -113,6 +118,18 @@ class ModuleRepository {
       modulesDirExists: dirExists,
     );
   }
+
+  /// Whether the boot-time loader is currently allowed to auto-load modules.
+  Future<bool> bootLoadEnabled() async {
+    final r = await RootShell.run("[ -f '$kBootLoadFlag' ] && echo Y || echo N");
+    return r.stdout.contains('Y');
+  }
+
+  Future<void> setBootLoadEnabled(bool enabled) => RootShell.run(
+        enabled
+            ? "mkdir -p '$kBootConfigDir' && touch '$kBootLoadFlag'"
+            : "rm -f '$kBootLoadFlag'",
+      );
 
   // ── High-level Wi-Fi mode switch (the main screen) ──────────────────────
 
