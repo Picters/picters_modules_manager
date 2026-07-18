@@ -68,18 +68,24 @@ class OverviewScreen extends StatelessWidget {
     if (err != null) showError(context, err);
   }
 
-  Future<void> _setBootLoad(BuildContext context, bool value) async {
-    HapticFeedback.selectionClick();
-    await controller.setBootLoadEnabled(value);
-  }
-
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
         final state = controller.state;
-        final adapters = state.adapters.where((a) => a.recognized).toList();
+        // Every plugged-in device, not just the Wi-Fi adapters we recognise —
+        // minus USB hubs (the phone's own root hubs), which are just noise.
+        // Recognised Wi-Fi adapters (the actionable ones) float to the top.
+        final devices = state.adapters
+            .where((a) => classifyUsb(a) != UsbKind.hub)
+            .toList()
+          ..sort((a, b) {
+            if (a.recognized != b.recognized) return a.recognized ? -1 : 1;
+            return a.device.displayName
+                .toLowerCase()
+                .compareTo(b.device.displayName.toLowerCase());
+          });
 
         return PolygonScrollView(
           onRefresh: controller.refresh,
@@ -95,31 +101,32 @@ class OverviewScreen extends StatelessWidget {
             const SizedBox(height: 26),
             SectionHeader(
               icon: Icons.usb,
-              label: 'Plugged-in adapters',
-              trailing: adapters.isEmpty ? null : '${adapters.length}',
+              label: 'USB devices',
+              trailing: devices.isEmpty ? null : '${devices.length}',
             ),
             const SizedBox(height: 12),
             AnimatedSection(
-              child: adapters.isEmpty
+              child: devices.isEmpty
                   ? const _EmptyAdapters(key: ValueKey('empty'))
                   : Card.outlined(
-                      key: ValueKey('list-${adapters.length}'),
+                      key: ValueKey('list-${devices.length}'),
                       child: Column(
                         children: [
-                          for (var i = 0; i < adapters.length; i++)
+                          for (var i = 0; i < devices.length; i++)
                             UnfoldIn(
-                              delay: Duration(milliseconds: i * 95),
+                              delay: Duration(milliseconds: i * 45),
                               child: Column(
                                 children: [
                                   if (i > 0) const CardDivider(),
                                   _AdapterRow(
-                                    adapter: adapters[i],
+                                    adapter: devices[i],
                                     state: state,
-                                    busy: controller.moduleBusy.contains(
-                                      adapters[i].match!.driver,
-                                    ),
+                                    busy: devices[i].recognized &&
+                                        controller.moduleBusy.contains(
+                                          devices[i].match!.driver,
+                                        ),
                                     onLoad: () =>
-                                        _loadAdapter(context, adapters[i]),
+                                        _loadAdapter(context, devices[i]),
                                   ),
                                 ],
                               ),
@@ -128,57 +135,9 @@ class OverviewScreen extends StatelessWidget {
                       ),
                     ),
             ),
-            const SizedBox(height: 26),
-            SectionHeader(icon: Icons.settings_outlined, label: 'Startup'),
-            const SizedBox(height: 12),
-            RepaintBoundary(
-              child: _BootLoadCard(
-                enabled: controller.bootLoadEnabled,
-                busy: controller.bootLoadBusy,
-                onChanged: (v) => _setBootLoad(context, v),
-              ),
-            ),
           ],
         );
       },
-    );
-  }
-}
-
-/// Toggles whether the boot-time loader (service.sh) auto-loads every staged
-/// non-Wi-Fi module on Android startup. Off by default — nothing loads at
-/// boot until the user opts in here.
-class _BootLoadCard extends StatelessWidget {
-  const _BootLoadCard({
-    required this.enabled,
-    required this.busy,
-    required this.onChanged,
-  });
-
-  final bool enabled;
-  final bool busy;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card.outlined(
-      child: SwitchListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        secondary: busy
-            ? SizedBox(
-                width: 24,
-                height: 24,
-                child: MorphingPolygon(size: 24, color: scheme.primary),
-              )
-            : Icon(Icons.flash_on, color: scheme.onSurfaceVariant),
-        title: const Text('Load modules on boot'),
-        subtitle: const Text(
-          'Auto-loads every module except Wi-Fi when the device starts.',
-        ),
-        value: enabled,
-        onChanged: busy ? null : onChanged,
-      ),
     );
   }
 }
@@ -402,39 +361,128 @@ class _WifiHeroCard extends StatelessWidget {
   }
 }
 
-/// The two-way Wi-Fi switch: a full-width segmented toggle between the stock
-/// vendor stack and our injection stack. `off` shows neither segment selected.
+/// The two-way Wi-Fi switch: a track with a single tablet that slides between
+/// the stock vendor stack and our injection stack. `off` slides the tablet out
+/// (both segments read as unselected). Custom (not [SegmentedButton]) so the
+/// selection glides across on a pill, matching the bottom bar's tablet.
 class _WifiSegmented extends StatelessWidget {
   const _WifiSegmented({required this.mode, required this.onSelect});
 
   final WifiMode mode;
   final ValueChanged<WifiMode> onSelect;
 
+  static const double _pad = 5;
+  static const double _height = 52;
+
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: SegmentedButton<WifiMode>(
-        segments: const [
-          ButtonSegment(
-            value: WifiMode.stock,
-            label: Text('Stock'),
-            icon: Icon(Icons.wifi),
+    final scheme = Theme.of(context).colorScheme;
+    final isOff = mode == WifiMode.off;
+    final index = mode == WifiMode.inject ? 1 : 0;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cellW = (constraints.maxWidth - _pad * 2) / 2;
+        return Container(
+          height: _height,
+          padding: const EdgeInsets.all(_pad),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(18),
           ),
-          ButtonSegment(
-            value: WifiMode.inject,
-            label: Text('Inject'),
-            icon: Icon(Icons.security),
+          child: Stack(
+            children: [
+              // The sliding tablet — hidden (faded out) while Wi-Fi is off.
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                top: 0,
+                bottom: 0,
+                left: cellW * index,
+                width: cellW,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 180),
+                  opacity: isOff ? 0 : 1,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.primary,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+              // Positioned.fill so the labels fill the track height and centre
+              // vertically — a bare Row here is aligned to the Stack's top
+              // corner, which shoved the text up out of the tablet.
+              Positioned.fill(
+                child: Row(
+                  children: [
+                    _WifiSeg(
+                      label: 'Stock',
+                      icon: Icons.wifi,
+                      selected: !isOff && mode == WifiMode.stock,
+                      onTap: () {
+                        if (mode != WifiMode.stock) onSelect(WifiMode.stock);
+                      },
+                    ),
+                    _WifiSeg(
+                      label: 'Inject',
+                      icon: Icons.security,
+                      selected: !isOff && mode == WifiMode.inject,
+                      onTap: () {
+                        if (mode != WifiMode.inject) onSelect(WifiMode.inject);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-        selected: mode == WifiMode.off ? <WifiMode>{} : {mode},
-        emptySelectionAllowed: true,
-        showSelectedIcon: false,
-        onSelectionChanged: (selection) {
-          if (selection.isEmpty) return;
-          final target = selection.first;
-          if (target != mode) onSelect(target);
-        },
+        );
+      },
+    );
+  }
+}
+
+class _WifiSeg extends StatelessWidget {
+  const _WifiSeg({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = selected ? scheme.onPrimary : scheme.onSurfaceVariant;
+
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(14)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -517,8 +565,31 @@ class _AdapterRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final match = adapter.match!;
-    final loaded = state.modules.any((m) => m.name == match.driver && m.loaded);
+    final device = adapter.device;
+    final kind = classifyUsb(adapter);
+
+    // The driver this device needs / uses: the one bound in the running kernel
+    // if any, else the driver our known-adapter table maps it to.
+    final moduleKey = adapter.recognized ? adapter.match!.driver : '';
+    final driverName =
+        device.driver.isNotEmpty ? device.driver : moduleKey;
+
+    // Presence in the app = a matching .ko is staged; in the system = a driver
+    // is bound now, or that staged module is loaded.
+    ModuleInfo? appModule;
+    if (moduleKey.isNotEmpty) {
+      final key = moduleKey.replaceAll('-', '_');
+      for (final m in state.modules) {
+        if (m.name == moduleKey || m.krName == key) {
+          appModule = m;
+          break;
+        }
+      }
+    }
+    final loaded = appModule?.loaded ?? false;
+    final inSystem = device.driver.isNotEmpty || loaded;
+
+    final canLoad = adapter.recognized && appModule != null && !inSystem;
 
     final Widget trailing;
     if (busy) {
@@ -527,39 +598,55 @@ class _AdapterRow extends StatelessWidget {
         size: 32,
         color: scheme.primary,
       );
-    } else if (loaded) {
-      trailing = Icon(
-        Icons.check_circle,
-        key: const ValueKey('loaded'),
-        color: scheme.primary,
-        size: 32,
-      );
-    } else {
+    } else if (canLoad) {
       trailing = FilledButton.tonal(
         key: const ValueKey('idle'),
         onPressed: onLoad,
         child: const Text('Load'),
       );
+    } else if (inSystem) {
+      trailing = _StatusTablet(
+        key: const ValueKey('active'),
+        label: loaded ? 'Loaded' : 'Active',
+        bg: scheme.tertiaryContainer,
+        fg: scheme.onTertiaryContainer,
+      );
+    } else if (adapter.recognized) {
+      // Known Wi-Fi adapter but its .ko isn't staged in the app.
+      trailing = _StatusTablet(
+        key: const ValueKey('missing'),
+        label: 'No driver',
+        bg: scheme.surfaceContainerHighest,
+        fg: scheme.onSurfaceVariant,
+      );
+    } else {
+      trailing = const SizedBox.shrink(key: ValueKey('none'));
     }
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       leading: CircleAvatar(
-        backgroundColor: scheme.surfaceContainerHighest,
+        backgroundColor: adapter.recognized
+            ? scheme.primaryContainer
+            : scheme.surfaceContainerHighest,
         child: Icon(
-          Icons.wifi_tethering,
-          color: scheme.onSurfaceVariant,
+          _kindIcon(kind),
+          color: adapter.recognized
+              ? scheme.onPrimaryContainer
+              : scheme.onSurfaceVariant,
           size: 20,
         ),
       ),
-      title: Text(adapter.device.displayName, overflow: TextOverflow.ellipsis),
-      subtitle: Text('${adapter.device.idPair} · ${match.driver}'),
-      // Fixed-width slot with everything CENTRED: the spinner and checkmark
-      // land dead-centre on the "Load" button's footprint and stay there —
-      // the slot never resizes, and the switcher's default centre-alignment
-      // keeps the outgoing/incoming children concentric, so nothing shifts.
+      title: Text(device.displayName, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        driverName.isNotEmpty
+            ? '${device.idPair} · $driverName'
+            : '${device.idPair} · no driver',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
       trailing: SizedBox(
-        width: 84,
+        width: 88,
         child: Center(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 280),
@@ -580,6 +667,47 @@ class _AdapterRow extends StatelessWidget {
   }
 }
 
+/// An icon representing what a plugged device is for.
+IconData _kindIcon(UsbKind kind) => switch (kind) {
+      UsbKind.wifi => Icons.wifi_tethering,
+      UsbKind.bluetooth => Icons.bluetooth,
+      UsbKind.can => Icons.directions_car_filled_outlined,
+      UsbKind.serial => Icons.cable,
+      UsbKind.network => Icons.lan_outlined,
+      UsbKind.storage => Icons.sd_storage_outlined,
+      UsbKind.hub => Icons.hub_outlined,
+      UsbKind.other => Icons.usb,
+    };
+
+/// A compact status tablet (Loaded / Active / No driver) for a device row.
+class _StatusTablet extends StatelessWidget {
+  const _StatusTablet({
+    super.key,
+    required this.label,
+    required this.bg,
+    required this.fg,
+  });
+
+  final String label;
+  final Color bg;
+  final Color fg;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 13),
+      ),
+    );
+  }
+}
+
 class _EmptyAdapters extends StatelessWidget {
   const _EmptyAdapters({super.key});
 
@@ -595,7 +723,7 @@ class _EmptyAdapters extends StatelessWidget {
             const SizedBox(width: 14),
             Expanded(
               child: Text(
-                'No supported adapter plugged in.',
+                'No USB devices detected.',
                 style: TextStyle(color: scheme.onSurfaceVariant),
               ),
             ),

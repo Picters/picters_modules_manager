@@ -316,7 +316,7 @@ class FadeInSlide extends StatefulWidget {
     this.offset = const Offset(0, 0.08),
     this.scaleFrom = 0.97,
     this.curve = Curves.easeOutCubic,
-    this.duration = const Duration(milliseconds: 460),
+    this.duration = const Duration(milliseconds: 360),
   });
 
   final Widget child;
@@ -343,9 +343,16 @@ class _FadeInSlideState extends State<FadeInSlide> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
-    Future.delayed(widget.delay, () {
-      if (mounted) _controller.forward();
-    });
+    // Start on this frame when there's no stagger — routing a zero delay
+    // through Future.delayed still costs an event-loop turn, which reads as a
+    // beat of lag before the card appears.
+    if (widget.delay == Duration.zero) {
+      _controller.forward();
+    } else {
+      Future.delayed(widget.delay, () {
+        if (mounted) _controller.forward();
+      });
+    }
   }
 
   @override
@@ -378,7 +385,7 @@ class UnfoldIn extends StatefulWidget {
     super.key,
     required this.child,
     this.delay = Duration.zero,
-    this.duration = const Duration(milliseconds: 540),
+    this.duration = const Duration(milliseconds: 380),
   });
 
   final Widget child;
@@ -404,9 +411,13 @@ class _UnfoldInState extends State<UnfoldIn> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    Future.delayed(widget.delay, () {
-      if (mounted) _c.forward();
-    });
+    if (widget.delay == Duration.zero) {
+      _c.forward();
+    } else {
+      Future.delayed(widget.delay, () {
+        if (mounted) _c.forward();
+      });
+    }
   }
 
   @override

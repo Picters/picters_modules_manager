@@ -5,6 +5,8 @@ class UsbDevice {
     required this.productId,
     required this.manufacturer,
     required this.product,
+    this.deviceClass = '',
+    this.driver = '',
   });
 
   /// Lowercase 4-hex-digit strings, e.g. "0bda" — as sysfs already reports them.
@@ -13,12 +15,77 @@ class UsbDevice {
   final String manufacturer;
   final String product;
 
+  /// `bDeviceClass` from sysfs, e.g. "e0" (wireless), "09" (hub), "00" (per
+  /// interface). Used to guess the device kind when no driver is bound.
+  final String deviceClass;
+
+  /// The kernel driver currently bound to the device's first interface (e.g.
+  /// "btusb", "cdc_acm", "88XXau"), or empty if nothing is bound — meaning the
+  /// device is present but no driver in the running kernel claims it.
+  final String driver;
+
   String get idPair => '$vendorId:$productId';
 
   String get displayName {
     final label = product.isNotEmpty ? product : manufacturer;
     return label.isNotEmpty ? label : 'USB device';
   }
+}
+
+/// Broad device families we can tell apart from the bound driver name or the
+/// USB device class — just enough to give each row a recognisable icon.
+enum UsbKind { wifi, bluetooth, can, serial, network, storage, hub, other }
+
+/// Best-effort classification: the bound driver name is the most reliable
+/// signal, then the recognised-Wi-Fi match, then the raw USB class code.
+UsbKind classifyUsb(DetectedAdapter a) {
+  final drv = a.device.driver.toLowerCase();
+  if (drv.isNotEmpty) {
+    if (drv == 'btusb' || drv.startsWith('bt')) return UsbKind.bluetooth;
+    if (drv == 'gs_usb' ||
+        drv.contains('peak_usb') ||
+        drv.contains('kvaser') ||
+        drv.contains('_can') ||
+        drv.contains('mcba')) {
+      return UsbKind.can;
+    }
+    if (drv.contains('cdc_acm') ||
+        drv.contains('ftdi') ||
+        drv.contains('cp210') ||
+        drv.contains('ch34') ||
+        drv.contains('pl2303') ||
+        drv.contains('option') ||
+        drv.contains('serial')) {
+      return UsbKind.serial;
+    }
+    if (drv.contains('cdc_ether') ||
+        drv.contains('cdc_ncm') ||
+        drv.contains('rndis') ||
+        drv.contains('r8152') ||
+        drv.contains('ax88') ||
+        drv.contains('asix')) {
+      return UsbKind.network;
+    }
+    if (drv.contains('storage') || drv == 'uas') return UsbKind.storage;
+    if (drv.contains('cfg80211') ||
+        drv.contains('80211') ||
+        drv.contains('wifi')) {
+      return UsbKind.wifi;
+    }
+  }
+  if (a.recognized) return UsbKind.wifi;
+  switch (a.device.deviceClass) {
+    case 'e0':
+      return UsbKind.bluetooth;
+    case '09':
+      return UsbKind.hub;
+    case '08':
+      return UsbKind.storage;
+    case '02':
+    case '0a':
+      return UsbKind.network;
+  }
+  return UsbKind.other;
 }
 
 /// A known Wi-Fi adapter chipset entry: which on-disk driver (.ko basename,
@@ -145,7 +212,11 @@ const String usbMarker = '___PMM_USB___';
 const String usbScanFragment =
     'for d in /sys/bus/usb/devices/*/; do '
     'if [ -f "\${d}idVendor" ] && [ -f "\${d}idProduct" ]; then '
-    'echo "$usbMarker\$(cat "\${d}idVendor" 2>/dev/null)|\$(cat "\${d}idProduct" 2>/dev/null)|\$(cat "\${d}manufacturer" 2>/dev/null)|\$(cat "\${d}product" 2>/dev/null)"; '
+    'drv=""; '
+    'for i in "\${d}"*:*/; do '
+    'if [ -L "\${i}driver" ]; then drv=\$(basename "\$(readlink "\${i}driver")"); break; fi; '
+    'done; '
+    'echo "$usbMarker\$(cat "\${d}idVendor" 2>/dev/null)|\$(cat "\${d}idProduct" 2>/dev/null)|\$(cat "\${d}manufacturer" 2>/dev/null)|\$(cat "\${d}product" 2>/dev/null)|\$(cat "\${d}bDeviceClass" 2>/dev/null)|\${drv}"; '
     'fi; done';
 
 /// Parses the lines produced by [usbScanFragment] (already split on '\n') into
@@ -165,6 +236,8 @@ List<DetectedAdapter> parseUsbLines(Iterable<String> lines) {
       productId: pid,
       manufacturer: fields.length > 2 ? fields[2].trim() : '',
       product: fields.length > 3 ? fields[3].trim() : '',
+      deviceClass: fields.length > 4 ? fields[4].trim().toLowerCase() : '',
+      driver: fields.length > 5 ? fields[5].trim() : '',
     );
     KnownAdapter? match;
     for (final k in kKnownAdapters) {

@@ -407,7 +407,7 @@ class _ModuleGroupState extends State<_ModuleGroup> {
                   ],
                   AnimatedRotation(
                     turns: _expanded ? 0.5 : 0.0,
-                    duration: const Duration(milliseconds: 340),
+                    duration: const Duration(milliseconds: 240),
                     curve: Curves.easeOutCubic,
                     child: Icon(Icons.expand_more, color: scheme.onSurfaceVariant),
                   ),
@@ -436,7 +436,7 @@ class _ModuleGroupState extends State<_ModuleGroup> {
             ),
             crossFadeState:
                 _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 340),
+            duration: const Duration(milliseconds: 240),
             sizeCurve: Curves.easeOutCubic,
             firstCurve: Curves.easeOut,
             secondCurve: Curves.easeOut,

@@ -104,7 +104,11 @@ ThemeData buildAppTheme(Brightness brightness) {
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: baseBg,
-    splashFactory: InkSparkle.splashFactory,
+    // InkRipple, not InkSparkle: the sparkle splash is drawn by a fragment
+    // shader that compiles on the *first* tap of a session, stalling that tap
+    // (and nav-bar presses) with a visible hitch. The ripple is a plain
+    // canvas draw — no shader warm-up, so every press animates instantly.
+    splashFactory: InkRipple.splashFactory,
     appBarTheme: AppBarTheme(
       backgroundColor: baseBg,
       surfaceTintColor: Colors.transparent,

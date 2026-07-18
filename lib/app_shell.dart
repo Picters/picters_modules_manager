@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'app_bottom_bar.dart';
 import 'app_controller.dart';
 import 'module_repository.dart';
 import 'modules_screen.dart';
 import 'native_bridge.dart';
 import 'overview_screen.dart';
+import 'settings_screen.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -109,6 +111,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _tab.value = i;
   }
 
+  void _openSettings() {
+    HapticFeedback.selectionClick();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsScreen(controller: _controller),
+      ),
+    );
+  }
+
   Future<void> _pinShortcut() async {
     HapticFeedback.lightImpact();
     final ok = await confirmAction(
@@ -131,6 +142,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final granted = _rootStatus == RootStatus.granted;
     return Scaffold(
+      // The floating bar hovers over the content instead of reserving a strip.
+      extendBody: true,
       appBar: AppBar(
         title: granted
             ? ValueListenableBuilder<int>(
@@ -141,12 +154,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         actions: [
           if (_hasUpdate)
             _UpdatePill(onTap: () => _showUpdateDialog(context, _controller)),
-          if (granted)
+          if (granted) ...[
             IconButton(
               icon: const Icon(Icons.add_to_home_screen_outlined),
               tooltip: 'Pin shortcut',
               onPressed: _pinShortcut,
             ),
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Settings',
+              onPressed: _openSettings,
+            ),
+          ],
           const SizedBox(width: 4),
         ],
       ),
@@ -173,10 +192,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             physics: const _SnappyPagePhysics(),
             onPageChanged: _onPageChanged,
             // Each page in its own layer, so a swipe just translates it
-            // instead of repainting both screens every frame.
+            // instead of repainting both screens every frame. Kept alive so
+            // leaving a tab and coming back preserves its state — expanded
+            // module groups, the search text and the active filter — instead
+            // of rebuilding the screen collapsed from scratch.
             children: [
-              RepaintBoundary(child: OverviewScreen(controller: _controller)),
-              RepaintBoundary(child: ModulesScreen(controller: _controller)),
+              _KeepAlive(
+                child: RepaintBoundary(
+                  child: OverviewScreen(controller: _controller),
+                ),
+              ),
+              _KeepAlive(
+                child: RepaintBoundary(
+                  child: ModulesScreen(controller: _controller),
+                ),
+              ),
             ],
           ),
         ),
@@ -185,20 +215,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ? RepaintBoundary(
               child: ValueListenableBuilder<int>(
                 valueListenable: _tab,
-                builder: (context, tab, _) => NavigationBar(
-                  selectedIndex: tab,
-                  onDestinationSelected: _goToTab,
-                  labelBehavior:
-                      NavigationDestinationLabelBehavior.onlyShowSelected,
-                  destinations: const [
-                    NavigationDestination(
-                      icon: Icon(Icons.home_outlined),
-                      selectedIcon: Icon(Icons.home),
+                builder: (context, tab, _) => AppBottomBar(
+                  index: tab,
+                  onSelect: _goToTab,
+                  items: const [
+                    BottomBarItem(
+                      icon: Icons.home_outlined,
+                      selectedIcon: Icons.home,
                       label: 'Overview',
                     ),
-                    NavigationDestination(
-                      icon: Icon(Icons.tune_outlined),
-                      selectedIcon: Icon(Icons.tune),
+                    BottomBarItem(
+                      icon: Icons.tune_outlined,
+                      selectedIcon: Icons.tune,
                       label: 'Modules',
                     ),
                   ],
@@ -207,6 +235,29 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             )
           : null,
     );
+  }
+}
+
+/// Wraps a PageView child so it isn't disposed when it scrolls off-screen —
+/// the two tabs then keep their state across switches.
+class _KeepAlive extends StatefulWidget {
+  const _KeepAlive({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAlive> createState() => _KeepAliveState();
+}
+
+class _KeepAliveState extends State<_KeepAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }
 
