@@ -38,6 +38,8 @@ class AppBottomBar extends StatelessWidget {
   static const double _cell = 60; // width per icon
   static const double _height = 56; // inner (tablet) height
   static const double _gap = 6; // padding between the tablet and the bar edge
+  static const double _barRadius = 22; // rounded-square bar, not a full stadium
+  static const double _tabRadius = 16; // rounded-square selection chip
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +61,7 @@ class AppBottomBar extends StatelessWidget {
           color: scheme.surfaceContainerHigh,
           elevation: 3,
           shadowColor: Colors.black.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular((_height + _gap * 2) / 2),
+          borderRadius: BorderRadius.circular(_barRadius),
           child: Padding(
             padding: const EdgeInsets.all(_gap),
             child: SizedBox(
@@ -79,7 +81,7 @@ class AppBottomBar extends StatelessWidget {
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: scheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(_height / 2),
+                        borderRadius: BorderRadius.circular(_tabRadius),
                       ),
                     ),
                   ),

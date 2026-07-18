@@ -219,6 +219,21 @@ const String usbScanFragment =
     'echo "$usbMarker\$(cat "\${d}idVendor" 2>/dev/null)|\$(cat "\${d}idProduct" 2>/dev/null)|\$(cat "\${d}manufacturer" 2>/dev/null)|\$(cat "\${d}product" 2>/dev/null)|\$(cat "\${d}bDeviceClass" 2>/dev/null)|\${drv}"; '
     'fi; done';
 
+/// Shell fragment that lists every live wireless netdev (a `phy80211` dir under
+/// it) as `name|driver|operstate|type`, one per line, each prefixed with
+/// [ifaceMarker]. `type` is the ARPHRD number (1 = ether/managed, 803 =
+/// radiotap/monitor). Folded into the same combined scan as [usbScanFragment].
+const String ifaceMarker = '___PMM_IFACE___';
+
+const String ifaceScanFragment =
+    'for n in /sys/class/net/*/; do '
+    '[ -d "\${n}phy80211" ] || continue; '
+    'ifn=\$(basename "\$n"); '
+    'drv=""; '
+    'if [ -L "\${n}device/driver" ]; then drv=\$(basename "\$(readlink "\${n}device/driver")"); fi; '
+    'echo "$ifaceMarker\${ifn}|\${drv}|\$(cat "\${n}operstate" 2>/dev/null)|\$(cat "\${n}type" 2>/dev/null)"; '
+    'done';
+
 /// Parses the lines produced by [usbScanFragment] (already split on '\n') into
 /// matched [DetectedAdapter]s.
 List<DetectedAdapter> parseUsbLines(Iterable<String> lines) {

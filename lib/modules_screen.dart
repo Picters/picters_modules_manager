@@ -7,10 +7,19 @@ import 'module_info.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// cfg80211 and mac80211 are the Wi-Fi core — switched from the Overview
-/// screen's Stock/Inject toggle, never module-by-module — so they're hidden
-/// from this per-driver list to avoid two places fighting over the same state.
-const Set<String> _hiddenModules = {'cfg80211', 'mac80211'};
+/// Modules hidden from the per-driver list:
+/// - cfg80211/mac80211 are the Wi-Fi core, switched from the Overview screen's
+///   Stock/Inject toggle (never module-by-module), so showing them here would
+///   let two places fight over the same state.
+/// - crc-itu-t / eeprom_93cx6 are dependency-only helper libraries (shipped just
+///   so rt73usb / rtl8187 resolve their selected symbols); they auto-load as
+///   deps and aren't standalone drivers, so a toggle row for them only confuses.
+const Set<String> _hiddenModules = {
+  'cfg80211',
+  'mac80211',
+  'crc-itu-t',
+  'eeprom_93cx6',
+};
 
 /// Load-state filter for the Modules list.
 enum _LoadFilter { all, loaded, unloaded }

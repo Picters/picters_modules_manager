@@ -4,9 +4,9 @@ import 'package:flutter/services.dart';
 import 'app_controller.dart';
 import 'widgets.dart';
 
-/// App settings, reached from the gear in the Overview app bar. Home for the
-/// boot-time auto-load toggle (moved off the Overview screen so that screen
-/// stays a pure status dashboard).
+/// App settings — the third tab in the bottom dock. Home for the boot-time
+/// auto-load toggle (kept off the Overview screen so that stays a pure status
+/// dashboard). Body-only: the app shell supplies the app bar and its title.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.controller});
 
@@ -19,25 +19,27 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) {
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-            children: [
-              const SectionHeader(icon: Icons.flash_on, label: 'Startup'),
-              const SizedBox(height: 12),
-              _BootLoadCard(
-                enabled: controller.bootLoadEnabled,
-                busy: controller.bootLoadBusy,
-                onChanged: _setBootLoad,
-              ),
-            ],
-          );
-        },
-      ),
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        return ListView(
+          // Same iOS-style spring/overscroll bounce as the other screens'
+          // PolygonScrollView, even though the short content fits the viewport.
+          physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
+          children: [
+            const SectionHeader(icon: Icons.flash_on, label: 'Startup'),
+            const SizedBox(height: 12),
+            _BootLoadCard(
+              enabled: controller.bootLoadEnabled,
+              busy: controller.bootLoadBusy,
+              onChanged: _setBootLoad,
+            ),
+          ],
+        );
+      },
     );
   }
 }

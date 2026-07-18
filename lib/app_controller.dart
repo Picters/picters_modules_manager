@@ -340,6 +340,15 @@ class AppController extends ChangeNotifier {
     return error;
   }
 
+  /// Disarm a pending return-to-stock (the Stock segment armed for reboot)
+  /// without running any switch — the device is still in Inject mode, so
+  /// tapping Inject just slides the tablet back.
+  void cancelStockReboot() {
+    if (!lastSwitchNeedsReboot) return;
+    lastSwitchNeedsReboot = false;
+    notifyListeners();
+  }
+
   /// Fire-and-forget: the persistent root session dies along with the
   /// device on reboot, so this never gets a real reply — that's expected.
   Future<void> rebootDevice() async {
@@ -505,7 +514,112 @@ class AppController extends ChangeNotifier {
       }
     }
     if (mod == null) return "Driver $driver isn't staged in this module.";
-    return toggleModule(mod, true);
+    final err = await toggleModule(mod, true);
+    // On a clean load the interface comes up managed already, so just hand it
+    // to the framework (no driver reload needed) so stock Settings can use it.
+    if (err == null) {
+      await reconfigureAdapter(chipsetDriver: driver, reloadDriver: false);
+    }
+    return err;
+  }
+
+  /// True while a Reconfigure round-trip is in flight, so the button can show a
+  /// loader and guard against re-entry.
+  bool reconfiguring = false;
+
+  /// USB Wi-Fi chipset drivers — used to tell an external adapter's interface
+  /// apart from the internal Wi-Fi and to pick what Reconfigure reloads.
+  static const Set<String> _chipsetDrivers = {
+    '88XXau', '8188eu', '8814au', '88x2bu',
+  };
+
+  /// The loaded USB Wi-Fi chipset driver, if any (first match).
+  String? get loadedAdapterDriver {
+    for (final m in state.modules) {
+      if (m.loaded && _chipsetDrivers.contains(m.name)) return m.name;
+    }
+    return null;
+  }
+
+  /// Live wireless interfaces backed by an external adapter — the candidates the
+  /// Reconfigure flow can initialise. One → run directly; more than one → the UI
+  /// offers a "Select interface" picker.
+  ///
+  /// Matching on the sysfs driver name alone is fragile (the USB driver often
+  /// registers a variant like `rtl88xxau` rather than the `.ko` basename), so in
+  /// Inject mode — where the internal Wi-Fi chip is torn down — treat every live
+  /// `wlanX` as an external adapter. Outside Inject mode, fall back to the exact
+  /// chipset-driver match so the built-in interface is never picked up.
+  List<WifiInterface> get adapterInterfaces => [
+        for (final i in state.interfaces)
+          if (_chipsetDrivers.contains(i.driver) ||
+              (state.wifiMode == WifiMode.inject && i.name.startsWith('wlan')))
+            i,
+      ];
+
+  /// Re-hand an adapter to the Android Wi-Fi framework as a managed station.
+  /// Pass [iface] to target a specific interface (the picker's choice); with
+  /// none, it resolves from [chipsetDriver] or the first adapter interface.
+  /// [reloadDriver] forces a chipset reload (to clear a monitor VIF); left null
+  /// it reloads only when the target interface is actually in monitor mode.
+  /// Returns an error string on failure, or null on success.
+  Future<String?> reconfigureAdapter({
+    WifiInterface? iface,
+    String? chipsetDriver,
+    bool? reloadDriver,
+  }) async {
+    if (reconfiguring) return null;
+
+    // Resolve which interface to initialise: explicit pick, else the one bound
+    // to the given driver, else the first external adapter interface.
+    WifiInterface? target = iface;
+    if (target == null) {
+      for (final i in adapterInterfaces) {
+        if (chipsetDriver != null && i.driver == chipsetDriver) {
+          target = i;
+          break;
+        }
+      }
+      if (target == null && adapterInterfaces.isNotEmpty) {
+        target = adapterInterfaces.first;
+      }
+    }
+
+    // For a driver reload we need the real .ko basename (e.g. "88XXau"), not the
+    // sysfs driver-name variant an interface reports — so prefer the explicit
+    // arg / the loaded chipset module, and only fall back to the iface's driver.
+    final driver = chipsetDriver ??
+        loadedAdapterDriver ??
+        (target != null && target.driver.isNotEmpty ? target.driver : null);
+    if (driver == null || driver.isEmpty) {
+      return 'No Wi-Fi adapter driver is loaded to reconfigure.';
+    }
+    final targetName = target?.name ?? 'wlan0';
+    final reload = reloadDriver ?? (target?.monitor ?? false);
+
+    reconfiguring = true;
+    notifyListeners();
+    String? error;
+    try {
+      final r = await _repo.reconfigureManaged(
+        chipsetDriver: driver,
+        iface: targetName,
+        reloadDriver: reload,
+      );
+      if (r.stdout.contains('NO_IFACE') || !r.stdout.contains('OK_RECONFIG')) {
+        error = 'Reconfigure could not bring up the interface: ${r.errorSummary}';
+      }
+    } catch (e) {
+      error = 'Error: $e';
+    } finally {
+      reconfiguring = false;
+      // Broadcast immediately — don't rely on _pollOnce to clear the button's
+      // loader, since it early-returns when a periodic poll is already in flight
+      // (or when nothing changed), which left the spinner stuck forever.
+      notifyListeners();
+      await _pollOnce(force: true);
+    }
+    return error;
   }
 
   @override

@@ -34,11 +34,35 @@ enum WifiMode {
   off,
 }
 
+/// A live wireless netdev (`wlanX`) as sysfs reports it — what the Reconfigure
+/// flow targets when handing an adapter to the Android framework.
+class WifiInterface {
+  const WifiInterface({
+    required this.name,
+    required this.driver,
+    required this.up,
+    required this.monitor,
+  });
+
+  /// Interface name, e.g. "wlan0", "wlan1".
+  final String name;
+
+  /// Bound kernel driver (e.g. "88XXau"), empty if none is attached.
+  final String driver;
+
+  /// operstate is "up" (vs down/dormant/unknown).
+  final bool up;
+
+  /// ARPHRD type is radiotap (802.11 monitor) rather than plain ether.
+  final bool monitor;
+}
+
 /// Everything one root scan gathers, in one immutable snapshot.
 class SystemState {
   const SystemState({
     required this.modules,
     required this.adapters,
+    required this.interfaces,
     required this.wifiMode,
     required this.cfgLoaded,
     required this.macLoaded,
@@ -48,6 +72,7 @@ class SystemState {
 
   final List<ModuleInfo> modules;
   final List<DetectedAdapter> adapters;
+  final List<WifiInterface> interfaces;
   final WifiMode wifiMode;
   final bool cfgLoaded;
   final bool macLoaded;
@@ -57,6 +82,7 @@ class SystemState {
   static const empty = SystemState(
     modules: [],
     adapters: [],
+    interfaces: [],
     wifiMode: WifiMode.stock,
     cfgLoaded: false,
     macLoaded: false,
@@ -77,6 +103,9 @@ class SystemState {
         .map((a) =>
             '${a.device.idPair}:${a.device.driver}:${a.recognized ? a.match!.driver : "?"}')
         .join(',');
-    return '$wifiMode|$mods|$adap|$modulesDirExists';
+    final ifs = interfaces
+        .map((i) => '${i.name}:${i.driver}:${i.up ? 1 : 0}:${i.monitor ? 1 : 0}')
+        .join(',');
+    return '$wifiMode|$mods|$adap|$ifs|$modulesDirExists';
   }
 }

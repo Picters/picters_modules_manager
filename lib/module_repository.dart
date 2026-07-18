@@ -34,9 +34,29 @@ class ModulePrecondition implements Exception {
   String toString() => message;
 }
 
+/// Parses the lines produced by [ifaceScanFragment] into [WifiInterface]s.
+List<WifiInterface> parseIfaceLines(Iterable<String> lines) {
+  final out = <WifiInterface>[];
+  for (final line in lines) {
+    final idx = line.indexOf(ifaceMarker);
+    if (idx < 0) continue;
+    final f = line.substring(idx + ifaceMarker.length).split('|');
+    final name = f.isNotEmpty ? f[0].trim() : '';
+    if (name.isEmpty) continue;
+    out.add(WifiInterface(
+      name: name,
+      driver: f.length > 1 ? f[1].trim() : '',
+      up: f.length > 2 && f[2].trim() == 'up',
+      monitor: f.length > 3 && f[3].trim() == '803',
+    ));
+  }
+  return out;
+}
+
 class ModuleRepository {
   /// One `su` round-trip for the whole picture: module files, /proc/modules,
-  /// and USB devices. Kept to a single call so 1s polling stays cheap.
+  /// USB devices, and wireless interfaces. Kept to a single call so 1s polling
+  /// stays cheap.
   Future<SystemState> scan() async {
     final r = await RootShell.run(
       'echo $_mModules; '
@@ -45,15 +65,18 @@ class ModuleRepository {
       'echo $_mProc; '
       'cat /proc/modules 2>/dev/null; '
       'echo ${_mProc}_USB; '
-      '$usbScanFragment',
+      '$usbScanFragment; '
+      'echo ${_mProc}_IFACE; '
+      '$ifaceScanFragment',
     );
 
     final lines = r.stdout.split('\n');
-    int section = 0; // 0=pre, 1=modules, 2=proc, 3=usb
+    int section = 0; // 0=pre, 1=modules, 2=proc, 3=usb, 4=iface
     final modFiles = <String>[];
     final loaded = <String>{};
     var dirExists = false;
     final usbLines = <String>[];
+    final ifaceLines = <String>[];
 
     for (final raw in lines) {
       final line = raw.trim();
@@ -69,6 +92,10 @@ class ModuleRepository {
         section = 3;
         continue;
       }
+      if (line == '${_mProc}_IFACE') {
+        section = 4;
+        continue;
+      }
       switch (section) {
         case 1:
           if (line == 'DIR_OK') {
@@ -82,6 +109,9 @@ class ModuleRepository {
           break;
         case 3:
           usbLines.add(raw);
+          break;
+        case 4:
+          ifaceLines.add(raw);
           break;
       }
     }
@@ -111,6 +141,7 @@ class ModuleRepository {
     return SystemState(
       modules: modules,
       adapters: parseUsbLines(usbLines),
+      interfaces: parseIfaceLines(ifaceLines),
       wifiMode: mode,
       cfgLoaded: cfg,
       macLoaded: mac,
@@ -179,6 +210,65 @@ class ModuleRepository {
   /// Reverting to stock Wi-Fi in software doesn't work — the PCIe link drops
   /// for good once qca_cld3 unloads, so this just reboots.
   Future<void> reboot() => RootShell.run('reboot', timeout: const Duration(seconds: 3));
+
+  /// Hand a loaded adapter back to Settings as a managed station: bounce Wi-Fi,
+  /// optionally reload the driver, restart wificond, re-enable (see inline why).
+  Future<ShellResult> reconfigureManaged({
+    required String chipsetDriver,
+    required String iface,
+    bool reloadDriver = true,
+  }) {
+    final kr = chipsetDriver.replaceAll('-', '_');
+    final b = StringBuffer();
+    b.writeln('IF=$iface');
+    b.writeln('svc wifi disable 2>/dev/null');
+    b.writeln('sleep 1');
+    if (reloadDriver) {
+      // Reloads the chipset to drop the monitor VIF / reset RF (no iw here);
+      // it re-creates the iface, so recompute IF from the driver's first netdev.
+      b.writeln("if grep -q '^$kr ' /proc/modules; then");
+      b.writeln("  rmmod '$kr' 2>/dev/null");
+      b.writeln('  sleep 1');
+      b.writeln("  insmod '$kModulesDir/$chipsetDriver.ko' 2>/dev/null");
+      b.writeln('  sleep 2');
+      b.writeln('  for n in /sys/class/net/*/; do');
+      b.writeln('    [ -d "\${n}phy80211" ] || continue');
+      b.writeln('    [ -L "\${n}device/driver" ] || continue');
+      b.writeln('    d=\$(basename "\$(readlink "\${n}device/driver")")');
+      b.writeln('    if [ "\$d" = "$kr" ] || [ "\$d" = "$chipsetDriver" ]; then');
+      b.writeln('      IF=\$(basename "\$n"); break');
+      b.writeln('    fi');
+      b.writeln('  done');
+      b.writeln('fi');
+    }
+    // Best-effort managed set — only if `iw` exists (it doesn't on stock, so the
+    // driver reload above is what actually resets the mode).
+    b.writeln('IW=\$(command -v iw 2>/dev/null)');
+    b.writeln('if [ -n "\$IW" ]; then');
+    b.writeln('  ip link set "\$IF" down 2>/dev/null');
+    b.writeln('  "\$IW" dev "\$IF" set type managed 2>/dev/null');
+    b.writeln('fi');
+    // The framework only drives its configured station iface (wlan0). If the
+    // chosen adapter is some other wlanX and no wlan0 exists, rename it so
+    // Settings picks it up. Guarded on "no existing wlan0" to avoid a clash.
+    b.writeln('if [ "\$IF" != "wlan0" ] && [ ! -d /sys/class/net/wlan0 ]; then');
+    b.writeln('  ip link set "\$IF" down 2>/dev/null');
+    b.writeln('  if ip link set "\$IF" name wlan0 2>/dev/null; then IF=wlan0; fi');
+    b.writeln('fi');
+    b.writeln('ip link set "\$IF" up 2>/dev/null');
+    // Restart wificond so it re-resolves the nl80211 family id a cfg80211 reload
+    // invalidated (stale id = every GetWiphyIndices ENOENT). Disable, restart, enable.
+    b.writeln('svc wifi disable 2>/dev/null');
+    b.writeln('sleep 2');
+    b.writeln('stop wificond 2>/dev/null || setprop ctl.stop wificond 2>/dev/null');
+    b.writeln('sleep 2');
+    b.writeln('start wificond 2>/dev/null || setprop ctl.start wificond 2>/dev/null');
+    b.writeln('sleep 2');
+    b.writeln('svc wifi enable 2>/dev/null');
+    b.writeln('sleep 2');
+    b.writeln('if ip link show "\$IF" >/dev/null 2>&1; then echo "OK_RECONFIG:\$IF"; else echo NO_IFACE; fi');
+    return RootShell.run(b.toString(), timeout: const Duration(seconds: 45));
+  }
 
   /// The dmesg tail any of switchToStock/switchToInject/setLoaded append
   /// after a `DMESG_TAIL:` marker — for surfacing to the user or attaching

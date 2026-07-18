@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:picters_modules_manager/app_controller.dart';
 import 'package:picters_modules_manager/module_categories.dart';
 import 'package:picters_modules_manager/module_info.dart';
+import 'package:picters_modules_manager/module_repository.dart';
 import 'package:picters_modules_manager/root_shell.dart';
 import 'package:picters_modules_manager/update_checker.dart';
 import 'package:picters_modules_manager/usb_devices.dart';
@@ -57,6 +58,28 @@ void main() {
     });
   });
 
+  group('parseIfaceLines', () {
+    test('parses name/driver/up/monitor from a scan line', () {
+      final r = parseIfaceLines(['${ifaceMarker}wlan1|88XXau|up|803']);
+      expect(r, hasLength(1));
+      expect(r.first.name, 'wlan1');
+      expect(r.first.driver, '88XXau');
+      expect(r.first.up, isTrue);
+      expect(r.first.monitor, isTrue); // ARPHRD 803 = radiotap/monitor
+    });
+
+    test('type 1 (ether) is managed, down operstate is not up', () {
+      final r = parseIfaceLines(['${ifaceMarker}wlan0|qca_cld3|down|1']);
+      expect(r.first.monitor, isFalse);
+      expect(r.first.up, isFalse);
+    });
+
+    test('skips noise and lines with an empty interface name', () {
+      final r = parseIfaceLines(['noise', '$ifaceMarker|88XXau|up|1']);
+      expect(r, isEmpty);
+    });
+  });
+
   group('module categories', () {
     test('categoryOf maps known modules and defaults to other', () {
       expect(categoryOf('btusb'), ModuleCategory.bluetooth);
@@ -105,6 +128,7 @@ void main() {
       SystemState withLoaded(bool loaded) => SystemState(
             modules: [ModuleInfo(name: 'x', loaded: loaded, isWifiClass: false)],
             adapters: const [],
+            interfaces: const [],
             wifiMode: WifiMode.off,
             cfgLoaded: false,
             macLoaded: false,

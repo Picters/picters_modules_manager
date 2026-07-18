@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart' show CupertinoSliverRefreshControl, Refr
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'module_info.dart';
 import 'theme.dart';
 
 /// A copyable dialog for a captured dmesg tail — shared by any failure path
@@ -185,6 +186,86 @@ Future<bool?> _dependencyDialog(
         FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
           child: Text(confirmLabel),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Interface chooser for Reconfigure when more than one adapter interface is
+/// live: one tappable tile per interface (name, driver, monitor/managed, up/
+/// down). Returns the chosen [WifiInterface], or null if cancelled.
+Future<WifiInterface?> showInterfacePicker(
+  BuildContext context, {
+  required List<WifiInterface> interfaces,
+}) {
+  final scheme = Theme.of(context).colorScheme;
+  final textTheme = Theme.of(context).textTheme;
+  return showDialog<WifiInterface>(
+    context: context,
+    builder: (context) => AlertDialog(
+      icon: const Icon(Icons.settings_input_antenna),
+      title: const Text('Select interface to initialise'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final i in interfaces)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Material(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => Navigator.of(context).pop(i),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          i.monitor ? Icons.radar : Icons.wifi,
+                          size: 20,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                i.name,
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${i.driver.isEmpty ? "no driver" : i.driver} · '
+                                '${i.monitor ? "monitor" : "managed"} · '
+                                '${i.up ? "up" : "down"}',
+                                style: textTheme.bodySmall
+                                    ?.copyWith(color: scheme.onSurfaceVariant),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
         ),
       ],
     ),

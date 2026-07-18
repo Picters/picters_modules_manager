@@ -47,7 +47,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   // two heavy screens. (Doing that mid-swipe was the freeze-then-jump.)
   final ValueNotifier<int> _tab = ValueNotifier(0);
 
-  static const _titles = ['Overview', 'Modules'];
+  static const _titles = ['Overview', 'Modules', 'Settings'];
 
   @override
   void initState() {
@@ -83,41 +83,38 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   bool _programmaticPage = false;
-  int _pageAnimGen = 0;
+  int _navGen = 0;
 
   void _goToTab(int i) {
     if (i == _tab.value) return;
     HapticFeedback.selectionClick();
-    final gen = ++_pageAnimGen;
+    final gen = ++_navGen;
     _programmaticPage = true;
     _tab.value = i;
+    // Slide the whole way from the current page, flying through the ones in
+    // between, to the tapped tab — a full page-through animation rather than a
+    // jump that starts mid-way.
     _pageController
         .animateToPage(
           i,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeInOut,
         )
-        // Only the latest animation clears the flag, so a stale one can't
-        // re-arm the swipe haptic early.
+        // Only the latest nav clears the flag, so a stale one can't re-arm the
+        // swipe haptic mid-animation.
         .then((_) {
-          if (gen == _pageAnimGen) _programmaticPage = false;
+          if (gen == _navGen) _programmaticPage = false;
         });
   }
 
   void _onPageChanged(int i) {
+    // Programmatic navigation already set _tab up front; ignore the intermediate
+    // page events it fires so the title doesn't flicker through the middle tab.
+    if (_programmaticPage) return;
     if (i == _tab.value) return;
     // A finger-swipe (not a nav-bar tap) gets its own haptic tick.
-    if (!_programmaticPage) HapticFeedback.selectionClick();
-    _tab.value = i;
-  }
-
-  void _openSettings() {
     HapticFeedback.selectionClick();
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => SettingsScreen(controller: _controller),
-      ),
-    );
+    _tab.value = i;
   }
 
   Future<void> _pinShortcut() async {
@@ -154,18 +151,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         actions: [
           if (_hasUpdate)
             _UpdatePill(onTap: () => _showUpdateDialog(context, _controller)),
-          if (granted) ...[
+          if (granted)
             IconButton(
               icon: const Icon(Icons.add_to_home_screen_outlined),
               tooltip: 'Pin shortcut',
               onPressed: _pinShortcut,
             ),
-            IconButton(
-              icon: const Icon(Icons.settings_outlined),
-              tooltip: 'Settings',
-              onPressed: _openSettings,
-            ),
-          ],
           const SizedBox(width: 4),
         ],
       ),
@@ -207,6 +198,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   child: ModulesScreen(controller: _controller),
                 ),
               ),
+              _KeepAlive(
+                child: RepaintBoundary(
+                  child: SettingsScreen(controller: _controller),
+                ),
+              ),
             ],
           ),
         ),
@@ -228,6 +224,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       icon: Icons.tune_outlined,
                       selectedIcon: Icons.tune,
                       label: 'Modules',
+                    ),
+                    BottomBarItem(
+                      icon: Icons.settings_outlined,
+                      selectedIcon: Icons.settings,
+                      label: 'Settings',
                     ),
                   ],
                 ),
