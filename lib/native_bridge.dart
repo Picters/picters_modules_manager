@@ -29,6 +29,16 @@ class NativeBridge {
     }
   }
 
+  /// Fully restarts the app process — used on the root-denied screen, since a
+  /// just-granted Superuser permission only takes on a clean start.
+  static Future<void> restartApp() async {
+    try {
+      await _channel.invokeMethod<void>('restartApp');
+    } on PlatformException {
+      // ignored — nothing else to do if the platform can't relaunch us
+    }
+  }
+
   /// The app's private internal files dir (getFilesDir), so root can drop the
   /// debug archive somewhere FileProvider can then serve. Null if unavailable.
   static Future<String?> filesDir() async {

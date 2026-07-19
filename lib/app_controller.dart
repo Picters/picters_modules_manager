@@ -41,6 +41,19 @@ class AppController extends ChangeNotifier {
   RootStatus rootStatus = RootStatus.checking;
   SystemState state = SystemState.empty;
 
+  /// False when the running kernel isn't a Picters build — drives the standing
+  /// warning banner (injection / modules aren't guaranteed on a foreign kernel).
+  bool onPictersKernel = true;
+
+  Future<void> _checkKernelAuthentic() async {
+    final r = await _repo.kernelRelease();
+    if (_disposed) return;
+    final ok = r.toLowerCase().contains('picters');
+    if (ok == onPictersKernel) return;
+    onPictersKernel = ok;
+    notifyListeners();
+  }
+
   bool wifiBusy = false;
   final Set<String> moduleBusy = {};
 
@@ -68,6 +81,7 @@ class AppController extends ChangeNotifier {
       unawaited(_refreshSlotInfo());
       unawaited(_refreshRebootPending());
       unawaited(_refreshBootLoadEnabled());
+      unawaited(_checkKernelAuthentic());
     } else {
       _startRootRecheckTimer();
     }
@@ -419,6 +433,7 @@ class AppController extends ChangeNotifier {
       unawaited(_refreshSlotInfo());
       unawaited(_refreshRebootPending());
       unawaited(_refreshBootLoadEnabled());
+      unawaited(_checkKernelAuthentic());
     } else {
       notifyListeners();
     }
@@ -507,29 +522,32 @@ class AppController extends ChangeNotifier {
   Future<String?> setWifiMode(WifiMode target) async {
     if (wifiBusy) return null;
 
-    // No software path back to stock on this hardware — go straight to the
-    // reboot prompt instead of attempting a doomed teardown.
-    if (target == WifiMode.stock) {
-      lastWifiSwitchDiagnostics = null;
-      lastSwitchNeedsReboot = true;
-      optimisticWifiMode = null;
-      notifyListeners();
-      return null;
-    }
-
     wifiBusy = true;
     optimisticWifiMode = target;
+    lastSwitchNeedsReboot = false;
     notifyListeners();
     String? error;
     try {
-      final result = await _repo.switchToInject(state.modules);
-      if (!result.stdout.contains('OK_INJECT')) {
-        lastWifiSwitchDiagnostics = _repo.dmesgTail(result);
-        lastSwitchNeedsReboot = false;
-        error = 'Failed to load cfg80211: ${result.errorSummary}';
+      if (target == WifiMode.stock) {
+        // Live return to stock — the cnss2/PCIe stack stayed up through Inject,
+        // so reloading the vendor Wi-Fi modules brings the built-in chip back
+        // without a reboot. If it can't, arm the reboot fallback.
+        final result = await _repo.switchToStock(state.modules);
+        if (result.stdout.contains('OK_STOCK')) {
+          lastWifiSwitchDiagnostics = null;
+        } else {
+          lastWifiSwitchDiagnostics = _repo.dmesgTail(result);
+          lastSwitchNeedsReboot = true;
+          error = 'Could not restore stock Wi-Fi live — reboot to finish.';
+        }
       } else {
-        lastWifiSwitchDiagnostics = null;
-        lastSwitchNeedsReboot = false;
+        final result = await _repo.switchToInject(state.modules);
+        if (!result.stdout.contains('OK_INJECT')) {
+          lastWifiSwitchDiagnostics = _repo.dmesgTail(result);
+          error = 'Failed to load cfg80211: ${result.errorSummary}';
+        } else {
+          lastWifiSwitchDiagnostics = null;
+        }
       }
     } on ModulePrecondition catch (e) {
       error = e.message;
@@ -598,6 +616,38 @@ class AppController extends ChangeNotifier {
     } finally {
       if (error != null) moduleErrors[module.name] = error;
       moduleBusy.remove(module.name);
+      optimisticModuleLoaded.remove(module.name);
+      notifyListeners();
+    }
+    return error;
+  }
+
+  /// Enables rndis_host via the cdc_ether swap (see [ModuleRepository.enableRndisHost]).
+  /// A plain toggle would fail with "Unknown symbol", so this is its own path.
+  Future<String?> enableRndisHost(ModuleInfo module) async {
+    const ce = 'cdc_ether';
+    if (moduleBusy.contains(module.name) || moduleBusy.contains(ce)) return null;
+    moduleBusy.add(module.name);
+    moduleBusy.add(ce);
+    moduleErrors.remove(module.name);
+    optimisticModuleLoaded[module.name] = true;
+    notifyListeners();
+    String? error;
+    try {
+      final r = await _repo.enableRndisHost();
+      final after = await _repo.scan();
+      state = after;
+      _lastFingerprint = after.fingerprint;
+      if (!r.stdout.contains('OK_RNDIS')) {
+        error = 'Failed to enable rndis_host: ${_repo.loadErrorSummary(r)}';
+        moduleErrors[module.name] = error;
+      }
+    } catch (e) {
+      error = 'Error: $e';
+      moduleErrors[module.name] = error;
+    } finally {
+      moduleBusy.remove(module.name);
+      moduleBusy.remove(ce);
       optimisticModuleLoaded.remove(module.name);
       notifyListeners();
     }

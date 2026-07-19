@@ -14,41 +14,26 @@ class OverviewScreen extends StatelessWidget {
 
   Future<void> _setWifi(BuildContext context, WifiMode target) async {
     HapticFeedback.selectionClick();
-    // Tapping Inject while the Stock segment is armed for reboot just cancels
-    // that pending return-to-stock — the tablet slides back, no switch runs
-    // (the device is already in Inject mode).
+    // Tapping Inject while the reboot fallback is armed just cancels it — the
+    // device is still in Inject mode, so nothing needs to run.
     if (target == WifiMode.inject && controller.lastSwitchNeedsReboot) {
       controller.cancelStockReboot();
       return;
     }
-    // Switching to Inject tears the stock vendor Wi-Fi down, and on this
-    // hardware it can't come back without a cold reboot — so make the user
-    // confirm that one-way trip before running it.
-    if (target == WifiMode.inject) {
-      final ok = await confirmAction(
-        context,
-        title: 'Switch to Inject mode?',
-        message:
-            'This unloads the stock Wi-Fi stack and loads the injection '
-            'stack for monitor mode and packet injection. Stock Wi-Fi can only '
-            'be restored by rebooting the device.',
-        confirmLabel: 'Switch',
-      );
-      if (!ok || !context.mounted) return;
-    }
+    // Both directions switch live in one tap now: Inject unloads the vendor
+    // stack, Stock reloads it (the cnss2/PCIe link survives, so no reboot).
     final err = await controller.setWifiMode(target);
     if (!context.mounted) return;
-    // Selecting Stock never runs a switch — it just flips the hero to the
-    // honest "Reboot needed" card (stock can't return without a cold boot), so
-    // there's nothing to announce here.
-    if (target == WifiMode.stock) return;
     if (err != null) {
       showError(context, err);
       if (controller.lastWifiSwitchDiagnostics != null) {
         showDiagnosticsDialog(context, controller.lastWifiSwitchDiagnostics!);
       }
     } else {
-      showInfo(context, 'Inject mode enabled.');
+      showInfo(
+        context,
+        target == WifiMode.stock ? 'Stock Wi-Fi restored.' : 'Inject mode enabled.',
+      );
     }
   }
 

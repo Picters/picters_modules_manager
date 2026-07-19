@@ -257,7 +257,7 @@ void _showBanner(BuildContext context, String message, {required bool isError}) 
             Expanded(
               child: Text(
                 message,
-                textAlign: TextAlign.center,
+                textAlign: TextAlign.start,
                 style: TextStyle(color: foreground),
               ),
             ),

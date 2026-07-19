@@ -98,6 +98,7 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "requestPinShortcut" -> result.success(requestPinShortcut())
                 "openRootManager" -> result.success(openRootManager())
+                "restartApp" -> { result.success(true); restartApp() }
                 "filesDir" -> result.success(filesDir.absolutePath)
                 "shareFile" -> result.success(shareFile(call.argument("path")))
                 "saveFile" -> saveFile(call.argument("path"), call.argument("name"), result)
@@ -167,6 +168,18 @@ class MainActivity : FlutterActivity() {
             return true
         }
         return false
+    }
+
+    /** Fully restarts the app process — a freshly granted Superuser permission
+     *  only attaches on a clean start, so the root-denied screen offers this. */
+    private fun restartApp() {
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+            ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK) }
+        mainHandler.post {
+            startActivity(intent)
+            finishAffinity()
+            Runtime.getRuntime().exit(0)
+        }
     }
 
     /** Hands the collected log archive to the system share sheet as a

@@ -49,6 +49,22 @@ class _ModulesScreenState extends State<ModulesScreen> {
   Future<void> _toggle(ModuleInfo m, bool want) async {
     HapticFeedback.selectionClick();
     if (want) {
+      // rndis_host needs our cdc_ether (the boot one hides the symbols it uses),
+      // so enabling it swaps cdc_ether in — warn, then run the dedicated path.
+      if (m.name == 'rndis_host') {
+        final ok = await confirmAction(
+          context,
+          title: 'Enable RNDIS host?',
+          message:
+              'This swaps the stock cdc_ether for the bundled one so rndis_host '
+              'can load, briefly bouncing any USB-Ethernet driver. Unplug USB '
+              'Ethernet adapters first.',
+          confirmLabel: 'Enable',
+        );
+        if (!ok || !mounted) return;
+        await controller.enableRndisHost(m);
+        return;
+      }
       // insmod doesn't pull in dependencies and there's no modules.dep for
       // modprobe on this device, so loading e.g. rtl8192cu on its own dies with
       // "Unknown symbol rtl_usb_probe". Resolve what it needs and offer to

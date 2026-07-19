@@ -17,6 +17,7 @@ const Set<String> kWifiClassModules = <String>{
 };
 
 const String _vendorWifi = 'qca_cld3_peach_v2';
+const String _vendorDlkmDir = '/vendor_dlkm/lib/modules';
 const String _mModules = '___PMM_MODS___';
 const String _mProc = '___PMM_PROC___';
 
@@ -207,8 +208,58 @@ class ModuleRepository {
     return RootShell.run(b.toString());
   }
 
-  /// Reverting to stock Wi-Fi in software doesn't work — the PCIe link drops
-  /// for good once qca_cld3 unloads, so this just reboots.
+  /// Live return to stock Wi-Fi — no reboot. Switching to Inject only unloads
+  /// qca_cld3, leaving the cnss2/PCIe stack up, so re-inserting the vendor
+  /// cfg80211/mac80211/qca_cld3 retrains the link and the built-in chip comes
+  /// back. Restarts the HAL + wificond so Settings re-attaches. On failure it
+  /// restores our inject stack and appends a DMESG_TAIL for the reboot fallback.
+  Future<ShellResult> switchToStock(List<ModuleInfo> modules) {
+    final adapters = [
+      for (final m in modules)
+        if (m.loaded && m.isWifiClass && m.name != 'cfg80211' && m.name != 'mac80211')
+          m.krName,
+    ];
+    final b = StringBuffer();
+    b.writeln('V=$_vendorDlkmDir');
+    b.writeln('svc wifi disable 2>/dev/null');
+    b.writeln('sleep 2');
+    for (final a in adapters) {
+      b.writeln("rmmod '$a' 2>/dev/null");
+    }
+    b.writeln('rmmod mac80211 2>/dev/null');
+    b.writeln('rmmod cfg80211 2>/dev/null');
+    b.writeln('insmod "\$V/cfg80211.ko" 2>/dev/null');
+    b.writeln('insmod "\$V/mac80211.ko" 2>/dev/null');
+    b.writeln('insmod "\$V/$_vendorWifi.ko" 2>&1');
+    b.writeln('sleep 3');
+    b.writeln('stop wificond 2>/dev/null || setprop ctl.stop wificond 2>/dev/null');
+    b.writeln('stop vendor.wifi_hal_legacy 2>/dev/null || '
+        'setprop ctl.stop vendor.wifi_hal_legacy 2>/dev/null');
+    b.writeln('sleep 2');
+    b.writeln('start vendor.wifi_hal_legacy 2>/dev/null || '
+        'setprop ctl.start vendor.wifi_hal_legacy 2>/dev/null');
+    b.writeln('sleep 1');
+    b.writeln('start wificond 2>/dev/null || setprop ctl.start wificond 2>/dev/null');
+    b.writeln('sleep 1');
+    b.writeln('svc wifi enable 2>/dev/null');
+    b.writeln('sleep 3');
+    b.writeln("if grep -q '^$_vendorWifi ' /proc/modules && [ -d /sys/class/net/wlan0 ]; then");
+    b.writeln('  echo OK_STOCK');
+    b.writeln('else');
+    // Live switch failed — put the injection stack back so Wi-Fi isn't left dead,
+    // then hand the reboot fallback the dmesg.
+    b.writeln("  rmmod $_vendorWifi 2>/dev/null");
+    b.writeln('  rmmod mac80211 2>/dev/null');
+    b.writeln('  rmmod cfg80211 2>/dev/null');
+    b.writeln("  insmod '$kModulesDir/cfg80211.ko' 2>/dev/null");
+    b.writeln("  insmod '$kModulesDir/mac80211.ko' 2>/dev/null");
+    b.writeln('  echo DMESG_TAIL:');
+    b.writeln("  dmesg 2>/dev/null | grep -iE 'qca|cnss|cfg80211|wlan' | tail -n 15");
+    b.writeln('fi');
+    return RootShell.run(b.toString(), timeout: const Duration(seconds: 70));
+  }
+
+  /// A hard reboot — the fallback when [switchToStock] can't restore stock live.
   Future<void> reboot() => RootShell.run('reboot', timeout: const Duration(seconds: 3));
 
   /// Hand a loaded adapter back to Settings as a managed station: bounce Wi-Fi,
@@ -319,6 +370,37 @@ class ModuleRepository {
       return RootShell.run(_insmodWithRetryScript(module));
     }
     return RootShell.run("rmmod '${module.krName}' 2>&1");
+  }
+
+  /// rndis_host needs cdc_ether's usbnet_generic_cdc_bind / usbnet_cdc_zte_rx_fixup
+  /// exports, but the vendor cdc_ether loaded at boot keeps them private (local
+  /// symbols). Swap in our cdc_ether, which exports them: unload its holders +
+  /// the vendor module, insmod ours, load rndis_host, then put the holders back
+  /// (bound to ours now) so USB-Ethernet keeps working. Prints OK_RNDIS on success.
+  Future<ShellResult> enableRndisHost() {
+    final b = StringBuffer();
+    b.writeln('HP=""');
+    b.writeln('if [ -d /sys/module/cdc_ether ]; then');
+    b.writeln('  for h in /sys/module/cdc_ether/holders/*; do');
+    b.writeln('    [ -e "\$h" ] || continue');
+    b.writeln('    n=\$(basename "\$h")');
+    b.writeln('    p=\$(find $_vendorDlkmDir /vendor/lib/modules $kModulesDir '
+        '-name "\$n.ko" 2>/dev/null | head -1)');
+    b.writeln('    [ -n "\$p" ] && HP="\$HP \$p"');
+    b.writeln('    rmmod "\$n" 2>/dev/null');
+    b.writeln('  done');
+    b.writeln('  rmmod cdc_ether 2>/dev/null');
+    b.writeln('fi');
+    b.writeln("insmod '$kModulesDir/cdc_ether.ko' 2>&1");
+    b.writeln("insmod '$kModulesDir/rndis_host.ko' 2>&1");
+    b.writeln('for p in \$HP; do [ -f "\$p" ] && insmod "\$p" 2>/dev/null; done');
+    b.writeln("if grep -q '^rndis_host ' /proc/modules; then");
+    b.writeln('  echo OK_RNDIS');
+    b.writeln('else');
+    b.writeln('  echo DMESG_TAIL:');
+    b.writeln("  dmesg 2>/dev/null | grep -iE 'rndis|cdc_ether|Unknown symbol' | tail -n 12");
+    b.writeln('fi');
+    return RootShell.run(b.toString(), timeout: const Duration(seconds: 40));
   }
 
   /// insmod several modules in dependency order (deepest dependency first),
@@ -480,6 +562,13 @@ class ModuleRepository {
         "else echo NO_MODULE_MANAGER; fi",
         timeout: const Duration(seconds: 90),
       );
+
+  /// The running kernel's release string (`uname -r`) — the app checks it for
+  /// the "picters" tag to warn when it's running on a foreign kernel.
+  Future<String> kernelRelease() async {
+    final r = await RootShell.run('uname -r 2>/dev/null');
+    return r.stdout.trim();
+  }
 
   /// A UUID that changes on every boot — lets the app tell whether a reboot has
   /// happened since a pending update was installed.

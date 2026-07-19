@@ -41,6 +41,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   // the whole Scaffold — the two screens have their own AnimatedBuilders.
   RootStatus _rootStatus = RootStatus.checking;
   bool _hasUpdate = false;
+  bool _onPictersKernel = true;
 
   // The active tab as a notifier, NOT setState: only the AppBar title and the
   // nav bar listen to it, so switching tabs never rebuilds the PageView or the
@@ -69,10 +70,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   void _handleControllerChanged() {
     final hasUpdate = _controller.anyUpdateAvailable;
-    if (_controller.rootStatus != _rootStatus || hasUpdate != _hasUpdate) {
+    final onPicters = _controller.onPictersKernel;
+    if (_controller.rootStatus != _rootStatus ||
+        hasUpdate != _hasUpdate ||
+        onPicters != _onPictersKernel) {
       setState(() {
         _rootStatus = _controller.rootStatus;
         _hasUpdate = hasUpdate;
+        _onPictersKernel = onPicters;
       });
     }
   }
@@ -169,16 +174,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         RootStatus.denied => _RootDenied(controller: _controller),
         // Pause the poll while a page scroll is in flight (swipe or tap-driven
         // animate) — a mid-transition rebuild is what stalled the animation.
-        RootStatus.granted => NotificationListener<ScrollNotification>(
-          onNotification: (n) {
-            if (n is ScrollStartNotification) {
-              _controller.setPollPaused(true);
-            } else if (n is ScrollEndNotification) {
-              _controller.setPollPaused(false);
-            }
-            return false;
-          },
-          child: PageView(
+        RootStatus.granted => Column(
+          children: [
+            // Standing warning strip on a foreign (non-Picters) kernel.
+            if (!_onPictersKernel) const _KernelWarningBanner(),
+            Expanded(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (n) {
+                  if (n is ScrollStartNotification) {
+                    _controller.setPollPaused(true);
+                  } else if (n is ScrollEndNotification) {
+                    _controller.setPollPaused(false);
+                  }
+                  return false;
+                },
+                child: PageView(
             controller: _pageController,
             physics: const _SnappyPagePhysics(),
             onPageChanged: _onPageChanged,
@@ -204,7 +214,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 ),
               ),
             ],
-          ),
+                ),
+              ),
+            ),
+          ],
         ),
       },
       bottomNavigationBar: granted
@@ -278,7 +291,6 @@ class _RootDenied extends StatelessWidget {
   Widget _content(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final rechecking = controller.recheckingRoot;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(32),
@@ -303,8 +315,9 @@ class _RootDenied extends StatelessWidget {
             Text('Root required', style: textTheme.headlineSmall),
             const SizedBox(height: 12),
             Text(
-              'Grant Superuser access in KernelSU, APatch or Magisk. '
-              'The app unlocks itself once you do.',
+              'Grant Superuser access in KernelSU, APatch or Magisk. It ships '
+              'as a system app, so turn on "Show system apps" in your manager '
+              'to find it in the list. The app unlocks itself once you grant it.',
               textAlign: TextAlign.center,
               style: textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurfaceVariant,
@@ -312,15 +325,9 @@ class _RootDenied extends StatelessWidget {
             ),
             const SizedBox(height: 28),
             FilledButton.icon(
-              onPressed: rechecking ? null : controller.recheckRoot,
-              icon: rechecking
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh),
-              label: Text(rechecking ? 'Checking…' : 'Check again'),
+              onPressed: () => NativeBridge.restartApp(),
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Restart app'),
             ),
           ],
         ),
@@ -652,6 +659,44 @@ class _UpdatePillState extends State<_UpdatePill>
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Standing warning shown under the app bar when the running kernel isn't a
+/// Picters build — injection and the bundled modules aren't guaranteed there.
+class _KernelWarningBanner extends StatelessWidget {
+  const _KernelWarningBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      child: SafeArea(
+        top: false,
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded,
+                  size: 20, color: scheme.onErrorContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Not running the Picters kernel — Wi-Fi injection and the '
+                  'bundled modules may not work.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onErrorContainer,
+                        fontWeight: FontWeight.w500,
+                      ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

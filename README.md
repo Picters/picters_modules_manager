@@ -6,6 +6,9 @@ toggles drivers over root, switches Wi-Fi between **Stock** and **Inject**, and 
 external adapter back to stock Android Settings as a normal managed station. Ships hidden inside
 the module, self-updates from GitHub Releases, and opens from its Action button.
 
+Because it ships as a system app, enable **Show system apps** in your KernelSU/Magisk manager to
+find it and grant Superuser the first time.
+
 ## Build
 
 ```sh

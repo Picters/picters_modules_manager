@@ -110,7 +110,7 @@ class _DebugCardState extends State<_DebugCard> {
     if (path == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Could not collect logs.', textAlign: TextAlign.center),
+          content: Text('Could not collect logs.', textAlign: TextAlign.start),
         ),
       );
       return;
@@ -141,7 +141,7 @@ class _DebugCardState extends State<_DebugCard> {
   }
 
   void _toast(String msg) => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg, textAlign: TextAlign.center)),
+        SnackBar(content: Text(msg, textAlign: TextAlign.start)),
       );
 
   @override
