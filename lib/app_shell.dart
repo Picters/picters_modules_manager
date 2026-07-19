@@ -9,6 +9,7 @@ import 'native_bridge.dart';
 import 'overview_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
+import 'update_checker.dart';
 import 'widgets.dart';
 
 class AppShell extends StatefulWidget {
@@ -336,6 +337,23 @@ class _RootDenied extends StatelessWidget {
   }
 }
 
+/// Combined "What's new" for the update dialog: the app's release notes plus the
+/// kernel's, if any. Null when there's nothing to show. Drops a leading markdown
+/// "What's Changed" heading so it doesn't echo the section title above it.
+String? _updateNotes(UpdateInfo? app, KernelUpdateInfo? kern) {
+  final parts = <String>[
+    if (app != null && app.notes.trim().isNotEmpty) app.notes.trim(),
+    if (kern != null && kern.notes.trim().isNotEmpty) kern.notes.trim(),
+  ];
+  if (parts.isEmpty) return null;
+  final text = parts
+      .join('\n\n———\n\n')
+      .replaceFirst(
+          RegExp(r"^#+\s*What.?s Changed\s*", caseSensitive: false), '')
+      .trim();
+  return text.isEmpty ? null : text;
+}
+
 /// One combined update sheet for everything — the app APK and/or the kernel +
 /// OOT-modules build. A single Install downloads each (a bar per artifact),
 /// installs them (x/y), then prompts a reboot to activate the modules.
@@ -469,13 +487,32 @@ void _showUpdateDialog(BuildContext context, AppController controller) {
                   ],
                 ),
               ],
-              const SizedBox(height: 12),
-              Text(
-                'The device will reboot at the end to activate the kernel '
-                'modules.',
-                style: textTheme.bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
-              ),
+              // Only a kernel/modules update needs a reboot to activate — an
+              // app-only update installs in place, so don't threaten a reboot.
+              if (kern != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'The device will reboot at the end to activate the kernel '
+                  'modules.',
+                  style: textTheme.bodySmall
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              ],
+              if (_updateNotes(app, kern) case final notes?) ...[
+                const SizedBox(height: 16),
+                Text("What's new", style: textTheme.titleSmall),
+                const SizedBox(height: 6),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      notes,
+                      style: textTheme.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ),
+              ],
             ],
           );
           actions = [
