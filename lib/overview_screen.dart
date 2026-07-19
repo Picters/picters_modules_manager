@@ -139,14 +139,22 @@ class OverviewScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             AnimatedSection(
+              // AnimatedSection's AnimatedSize is the ONE height animator; rows
+              // only fade/slide in (RowReveal) so no nested size animator fights
+              // it. Adding or unplugging a device just glides the card height.
               child: devices.isEmpty
                   ? const _EmptyAdapters(key: ValueKey('empty'))
                   : Card.outlined(
-                      key: ValueKey('list-${devices.length}'),
+                      key: const ValueKey('list'),
                       child: Column(
                         children: [
                           for (var i = 0; i < devices.length; i++)
-                            UnfoldIn(
+                            RowReveal(
+                              key: ValueKey(
+                                'dev-${devices[i].device.idPair}-'
+                                '${devices[i].device.product}-'
+                                '${devices[i].device.manufacturer}',
+                              ),
                               delay: Duration(milliseconds: i * 45),
                               child: Column(
                                 children: [
@@ -728,11 +736,10 @@ class _AdapterRow extends StatelessWidget {
       ),
       trailing: SizedBox(
         width: 88,
-        // The load spinner sits centred in the trailing box (as it used to);
-        // the resting controls (Load / Loaded / Active / Not found) right-align
-        // so they hug the right inset symmetrically to the leading avatar.
+        // Centre both the spinner and the resting controls in the box so the busy
+        // spinner morphs into the iface tablet at the same centre — no sideways jump.
         child: Align(
-          alignment: busy ? Alignment.center : Alignment.centerRight,
+          alignment: Alignment.center,
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 280),
             switchInCurve: Curves.easeOutCubic,

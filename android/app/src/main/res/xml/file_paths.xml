@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider roots. Only the debug-log archive dir (inside the app's
+     private internal files dir) is exposed, so a content:// URI can be handed
+     to the share sheet / SAF save dialog. -->
+<paths>
+    <files-path name="pmm_logs" path="pmm_logs/" />
+</paths>

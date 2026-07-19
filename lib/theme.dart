@@ -255,7 +255,11 @@ void _showBanner(BuildContext context, String message, {required bool isError}) 
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(message, style: TextStyle(color: foreground)),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: foreground),
+              ),
             ),
           ],
         ),

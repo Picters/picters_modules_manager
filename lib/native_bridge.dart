@@ -28,4 +28,37 @@ class NativeBridge {
       return false;
     }
   }
+
+  /// The app's private internal files dir (getFilesDir), so root can drop the
+  /// debug archive somewhere FileProvider can then serve. Null if unavailable.
+  static Future<String?> filesDir() async {
+    try {
+      return await _channel.invokeMethod<String>('filesDir');
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  /// Hands [path] to the system share sheet (as a content:// URI via
+  /// FileProvider). Returns false if the file is gone or no app handled it.
+  static Future<bool> shareFile(String path) async {
+    try {
+      return await _channel.invokeMethod<bool>('shareFile', {'path': path}) ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Opens the SAF "save to…" dialog for [path], suggesting [name]. Returns
+  /// true only once the file is copied to the chosen location.
+  static Future<bool> saveFile(String path, String name) async {
+    try {
+      return await _channel
+              .invokeMethod<bool>('saveFile', {'path': path, 'name': name}) ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
 }

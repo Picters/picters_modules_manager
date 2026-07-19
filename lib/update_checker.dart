@@ -8,6 +8,41 @@ import 'package:package_info_plus/package_info_plus.dart';
 /// so it can update itself here without waiting on a new kernel build.
 const String kUpdateRepo = 'Picters/picters_modules_manager';
 
+/// Where kernel + OOT-modules builds are released (date-tagged zips, published
+/// by build.rs's do_release step). The app watches this for the matching build.
+const String kKernelRepo = 'Picters/android_kernel_xiaomi_sm8850-extra';
+
+/// Packs a "YYYYMMDD-HHMM" build stamp into the same monotonic int the module's
+/// module.prop carries (must match build.rs module_version_code). 0 if unparsed.
+int moduleVersionCode(String yyyymmdd, String hhmm) {
+  final ymd = int.tryParse(yyyymmdd);
+  final hm = int.tryParse(hhmm);
+  if (ymd == null || hm == null) return 0;
+  return (ymd - 20200000) * 10000 + hm;
+}
+
+/// An available kernel/OOT-modules build: the two flashable zips plus the packed
+/// versionCode parsed from their date-stamped names.
+class KernelUpdateInfo {
+  const KernelUpdateInfo({
+    required this.versionCode,
+    required this.dateLabel,
+    required this.modulesUrl,
+    required this.modulesName,
+    required this.kernelUrl,
+    required this.kernelName,
+    required this.notes,
+  });
+
+  final int versionCode;
+  final String dateLabel; // e.g. "20260719-2228"
+  final String modulesUrl;
+  final String modulesName;
+  final String? kernelUrl;
+  final String? kernelName;
+  final String notes;
+}
+
 class UpdateInfo {
   const UpdateInfo({required this.version, required this.apkUrl, required this.notes});
 
@@ -62,6 +97,111 @@ class UpdateChecker {
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// Checks the kernel repo for the newest build that ships an OOT-modules zip
+  /// (skips the ci-core-latest binary release). Returns its two zip URLs + the
+  /// packed versionCode, or null if none / offline / the API call fails.
+  Future<KernelUpdateInfo?> checkKernel() async {
+    final client = HttpClient();
+    try {
+      final req = await client
+          .getUrl(Uri.parse(
+              'https://api.github.com/repos/$kKernelRepo/releases?per_page=15'))
+          .timeout(const Duration(seconds: 10));
+      req.headers.set('Accept', 'application/vnd.github+json');
+      req.headers.set('User-Agent', 'PictersModulesManager');
+      final res = await req.close().timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return null;
+      final body = await res.transform(utf8.decoder).join();
+      final releases = (jsonDecode(body) as List?) ?? const [];
+
+      // Releases come newest-first; take the first that carries a modules zip.
+      final stamp = RegExp(r'(\d{8})-(\d{4})\.zip$');
+      for (final r in releases) {
+        final rel = r as Map<String, dynamic>;
+        if (rel['draft'] == true) continue;
+        final assets = (rel['assets'] as List?) ?? const [];
+        String? modulesUrl, modulesName, kernelUrl, kernelName;
+        for (final a in assets) {
+          final asset = a as Map<String, dynamic>;
+          final name = asset['name'] as String? ?? '';
+          final url = asset['browser_download_url'] as String?;
+          if (url == null || !name.toLowerCase().endsWith('.zip')) continue;
+          if (name.contains('OOT-Modules')) {
+            modulesUrl = url;
+            modulesName = name;
+          } else if (name.contains('Kernel')) {
+            kernelUrl = url;
+            kernelName = name;
+          }
+        }
+        if (modulesUrl == null || modulesName == null) continue;
+
+        final m = stamp.firstMatch(modulesName);
+        if (m == null) continue;
+        return KernelUpdateInfo(
+          versionCode: moduleVersionCode(m.group(1)!, m.group(2)!),
+          dateLabel: '${m.group(1)}-${m.group(2)}',
+          modulesUrl: modulesUrl,
+          modulesName: modulesName,
+          kernelUrl: kernelUrl,
+          kernelName: kernelName,
+          notes: (rel['body'] as String? ?? '').trim(),
+        );
+      }
+      return null;
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Downloads a release zip to [destPath], retrying transient failures and
+  /// checking it's a real (PK-magic) zip of the declared size before returning.
+  Future<File> downloadZip(String url, String destPath,
+      {void Function(int received, int total)? onProgress}) async {
+    final file = File(destPath);
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final client = HttpClient();
+      try {
+        final req = await client.getUrl(Uri.parse(url));
+        req.headers.set('User-Agent', 'PictersModulesManager');
+        final res = await req.close().timeout(const Duration(seconds: 120));
+        if (res.statusCode != 200) {
+          throw HttpException('HTTP ${res.statusCode} for $url');
+        }
+        final total = res.contentLength;
+        final sink = file.openWrite();
+        var received = 0;
+        try {
+          await for (final chunk in res) {
+            received += chunk.length;
+            sink.add(chunk);
+            onProgress?.call(received, total);
+          }
+        } finally {
+          await sink.close();
+        }
+        final len = await file.length();
+        if (len < 1024 || (total > 0 && len != total)) {
+          throw Exception('bad zip size: got $len, expected $total');
+        }
+        final header = await file.openRead(0, 4).expand((c) => c).toList();
+        if (!hasApkMagic(header)) {
+          throw Exception('downloaded file is not a valid zip');
+        }
+        return file;
+      } catch (e) {
+        lastError = e;
+        await Future<void>.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+      } finally {
+        client.close(force: true);
+      }
+    }
+    throw Exception('zip download failed after 3 attempts: $lastError');
   }
 
   /// Downloads the release APK into the app's cache dir, retrying on

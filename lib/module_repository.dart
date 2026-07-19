@@ -256,12 +256,27 @@ class ModuleRepository {
     b.writeln('  if ip link set "\$IF" name wlan0 2>/dev/null; then IF=wlan0; fi');
     b.writeln('fi');
     b.writeln('ip link set "\$IF" up 2>/dev/null');
-    // Restart wificond so it re-resolves the nl80211 family id a cfg80211 reload
-    // invalidated (stale id = every GetWiphyIndices ENOENT). Disable, restart, enable.
+    // The QCA wifi HAL opens /dev/wlan as its driver-state control param. It must
+    // be a CHAR device (sepolicy grants hal_wifi_default vendor_wlan_device:chr_file,
+    // not :file — a regular file gets EACCES). Back it by null (1,3) so open/read/
+    // write succeed, and label it as the vendor expects via restorecon.
+    b.writeln('rm -f /dev/wlan 2>/dev/null');
+    b.writeln('mknod /dev/wlan c 1 3 2>/dev/null');
+    b.writeln('chmod 666 /dev/wlan 2>/dev/null');
+    b.writeln('restorecon /dev/wlan 2>/dev/null || '
+        'chcon u:object_r:vendor_wlan_device:s0 /dev/wlan 2>/dev/null');
+    // Restart the vendor wifi HAL + wificond so they re-enumerate with the adapter
+    // up: a stale boot HAL only knows the unloaded internal chip ("no chip info"
+    // -> createStaIface fails), and wificond caches a now-stale nl80211 family id.
     b.writeln('svc wifi disable 2>/dev/null');
     b.writeln('sleep 2');
     b.writeln('stop wificond 2>/dev/null || setprop ctl.stop wificond 2>/dev/null');
+    b.writeln('stop vendor.wifi_hal_legacy 2>/dev/null || '
+        'setprop ctl.stop vendor.wifi_hal_legacy 2>/dev/null');
     b.writeln('sleep 2');
+    b.writeln('start vendor.wifi_hal_legacy 2>/dev/null || '
+        'setprop ctl.start vendor.wifi_hal_legacy 2>/dev/null');
+    b.writeln('sleep 1');
     b.writeln('start wificond 2>/dev/null || setprop ctl.start wificond 2>/dev/null');
     b.writeln('sleep 2');
     b.writeln('svc wifi enable 2>/dev/null');
@@ -393,6 +408,120 @@ class ModuleRepository {
       "dmesg 2>/dev/null | grep -iE '${module.krName}' | tail -n 20",
     );
     return r.stdout.trim();
+  }
+
+  /// Bundles last_kmsg (previous-boot panic), dmesg and logcat into one gzip
+  /// archive inside [filesDir] (the app's private internal dir, so it dodges
+  /// FUSE/FileProvider woes) and returns its path (null if it wasn't made).
+  /// The archive is chowned + chcon'd to the app so the non-root app can read it.
+  Future<String?> collectDebugLogs(String filesDir) async {
+    final b = StringBuffer();
+    b.writeln("BASE='$filesDir'");
+    b.writeln(r'D="$BASE/pmm_logs"');
+    b.writeln('rm -rf "\$D" 2>/dev/null');
+    b.writeln('mkdir -p "\$D"');
+    b.writeln('TS=\$(date +%Y%m%d-%H%M%S)');
+    b.writeln('S=/data/local/tmp/pmm_dbg_\$TS');
+    b.writeln('mkdir -p "\$S"');
+    b.writeln('{ echo "collected \$TS"; getprop ro.build.version.incremental; uname -a; } > "\$S/info.txt" 2>&1');
+    b.writeln('cat /data/vendor/diag/last_kmsg > "\$S/last_kmsg.txt" 2>/dev/null || echo "(no last_kmsg)" > "\$S/last_kmsg.txt"');
+    b.writeln('dmesg > "\$S/dmesg.txt" 2>/dev/null || echo "(dmesg unavailable)" > "\$S/dmesg.txt"');
+    b.writeln('logcat -d -b all -v time > "\$S/logcat.txt" 2>/dev/null || echo "(logcat unavailable)" > "\$S/logcat.txt"');
+    b.writeln('OUT="\$D/picters-logs-\$TS.tar.gz"');
+    b.writeln('tar -czf "\$OUT" -C "\$S" . 2>/dev/null');
+    b.writeln('rm -rf "\$S"');
+    // Hand the dir+archive to the app: copy its own data dir's owner + SELinux
+    // context (app_data_file:s0:c...) so the non-root app can open the file.
+    b.writeln("A=/data/data/com.picters.modulesmanager");
+    b.writeln(r'O=$(stat -c %u "$A" 2>/dev/null); G=$(stat -c %g "$A" 2>/dev/null); C=$(stat -c %C "$A" 2>/dev/null)');
+    b.writeln(r'[ -n "$O" ] && chown -R "$O:$G" "$D" 2>/dev/null');
+    b.writeln(r'[ -n "$C" ] && chcon -R "$C" "$D" 2>/dev/null');
+    b.writeln('chmod 660 "\$OUT" 2>/dev/null');
+    b.writeln('echo "\$OUT"');
+    final r = await RootShell.run(b.toString(), timeout: const Duration(seconds: 60));
+    if (!r.ok) return null;
+    final path = r.stdout.trim().split('\n').last.trim();
+    return path.endsWith('.tar.gz') ? path : null;
+  }
+
+  /// Deletes a collected archive — the "discard" path when the user is done.
+  Future<void> deleteDebugLogs(String path) =>
+      RootShell.run("rm -f '$path'");
+
+  // ── Kernel / OOT-modules update delivery ────────────────────────────────
+
+  static const String _modProp =
+      '/data/adb/modules/picters-modules-pack/module.prop';
+
+  /// The versionCode of the currently-installed modules pack (module.prop),
+  /// used to gate features on a matching kernel. 0 if not installed/unstamped.
+  Future<int> installedModulesVersionCode() async {
+    final r = await RootShell.run(
+      "grep '^versionCode=' '$_modProp' 2>/dev/null | head -1 | cut -d= -f2",
+    );
+    return int.tryParse(r.stdout.trim()) ?? 0;
+  }
+
+  /// Copies a downloaded zip into /sdcard/Download so the user can flash it
+  /// themselves in KernelSU/Magisk. Uses root since scoped storage blocks it.
+  Future<bool> copyToDownloads(String srcPath, String name) async {
+    final r = await RootShell.run(
+      "mkdir -p /sdcard/Download && cp '$srcPath' '/sdcard/Download/$name' && "
+      "chmod 664 '/sdcard/Download/$name' && echo OK",
+    );
+    return r.stdout.contains('OK');
+  }
+
+  /// Installs the OOT-modules zip as a KernelSU (or Magisk) module — the safe
+  /// auto path (no boot flashing). A reboot is required to activate it.
+  Future<ShellResult> installModuleZip(String zipPath) => RootShell.run(
+        "if command -v ksud >/dev/null 2>&1; then ksud module install '$zipPath' 2>&1; "
+        "elif command -v magisk >/dev/null 2>&1; then magisk --install-module '$zipPath' 2>&1; "
+        "else echo NO_MODULE_MANAGER; fi",
+        timeout: const Duration(seconds: 90),
+      );
+
+  /// A UUID that changes on every boot — lets the app tell whether a reboot has
+  /// happened since a pending update was installed.
+  Future<String> currentBootId() async {
+    final r = await RootShell.run('cat /proc/sys/kernel/random/boot_id 2>/dev/null');
+    return r.stdout.trim();
+  }
+
+  /// (isAbDevice, activeSlotSuffix). isAb is true only when both boot_a and
+  /// boot_b exist; activeSlot is "_a"/"_b" (empty on non-slot devices).
+  Future<(bool, String)> slotInfo() async {
+    final r = await RootShell.run(
+      'A=\$(getprop ro.boot.slot_suffix); '
+      'if ls /dev/block/by-name/boot_a >/dev/null 2>&1 && '
+      'ls /dev/block/by-name/boot_b >/dev/null 2>&1; then echo "AB \$A"; '
+      'else echo "SINGLE \$A"; fi',
+    );
+    final parts = r.stdout.trim().split(RegExp(r'\s+'));
+    final ab = parts.isNotEmpty && parts.first == 'AB';
+    final slot = parts.length > 1 ? parts[1].trim() : '';
+    return (ab, slot);
+  }
+
+  /// Flashes an AnyKernel3 kernel zip to a boot slot via root (bootmode). With
+  /// [inactiveSlot] true, AK3's slot_select=inactive targets the OTHER slot;
+  /// otherwise it writes the active slot. Success = the run prints AK3_EXIT:0
+  /// and no AK3 "abort". Never touches the boot image on a plain module update.
+  Future<ShellResult> flashKernelZip(String zipPath,
+      {required bool inactiveSlot}) {
+    final b = StringBuffer();
+    b.writeln('AK=/data/local/tmp/pmm_ak3');
+    b.writeln('rm -rf "\$AK"; mkdir -p "\$AK"');
+    b.writeln(
+        'if ! unzip -o "$zipPath" -d "\$AK" >/dev/null 2>&1; then echo AK3_UNZIP_FAIL; exit 0; fi');
+    b.writeln('UB="\$AK/META-INF/com/google/android/update-binary"');
+    b.writeln('[ -f "\$UB" ] || { echo AK3_NO_UB; exit 0; }');
+    b.writeln('export AKHOME="\$AK"');
+    if (inactiveSlot) b.writeln('export slot_select=inactive');
+    b.writeln('sh "\$UB" 3 1 "$zipPath" 2>&1');
+    b.writeln('echo "AK3_EXIT:\$?"');
+    b.writeln('rm -rf "\$AK"');
+    return RootShell.run(b.toString(), timeout: const Duration(seconds: 180));
   }
 
   /// The insmod/rmmod output itself, excluding the DMESG_TAIL section that

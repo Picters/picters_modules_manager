@@ -1,28 +1,38 @@
 package com.picters.modulesmanager
 
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.FileProvider
 import com.topjohnwu.superuser.ipc.RootService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 private const val CHANNEL = "com.picters.modulesmanager/system"
 private const val ROOT_EVENTS = "com.picters.modulesmanager/system/root_events"
+private const val REQ_SAVE_DOC = 4201
 
 class MainActivity : FlutterActivity() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // Pending SAF "create document" save (source file + the Flutter result to
+    // complete once the user picks a destination in onActivityResult).
+    private var pendingSaveFile: File? = null
+    private var pendingSaveResult: MethodChannel.Result? = null
 
     // ── Root service (AIDL/Binder) bridge ────────────────────────────────────
     private var kernelService: IKernelService? = null
@@ -88,6 +98,9 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "requestPinShortcut" -> result.success(requestPinShortcut())
                 "openRootManager" -> result.success(openRootManager())
+                "filesDir" -> result.success(filesDir.absolutePath)
+                "shareFile" -> result.success(shareFile(call.argument("path")))
+                "saveFile" -> saveFile(call.argument("path"), call.argument("name"), result)
                 "bindRoot" -> bindRootService(result)
                 "execRoot" -> execRoot(
                     call.argument("id"),
@@ -154,6 +167,74 @@ class MainActivity : FlutterActivity() {
             return true
         }
         return false
+    }
+
+    /** Hands the collected log archive to the system share sheet as a
+     *  content:// URI. Returns false if the file is missing. */
+    private fun shareFile(path: String?): Boolean {
+        val f = path?.let { File(it) } ?: return false
+        if (!f.exists()) return false
+        return try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "application/gzip"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, "Share logs").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        } catch (t: Throwable) {
+            Log.w("PKM_DBG", "shareFile failed", t)
+            false
+        }
+    }
+
+    /** Opens the SAF "create document" dialog so the user picks where to save
+     *  the archive; the copy happens in onActivityResult. */
+    private fun saveFile(path: String?, name: String?, result: MethodChannel.Result) {
+        val f = path?.let { File(it) }
+        if (f == null || !f.exists()) {
+            result.success(false)
+            return
+        }
+        try {
+            pendingSaveFile = f
+            pendingSaveResult = result
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/gzip"
+                putExtra(Intent.EXTRA_TITLE, name ?: f.name)
+            }
+            startActivityForResult(intent, REQ_SAVE_DOC)
+        } catch (t: Throwable) {
+            pendingSaveFile = null
+            pendingSaveResult = null
+            result.success(false)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_SAVE_DOC) return
+        val res = pendingSaveResult
+        val src = pendingSaveFile
+        pendingSaveResult = null
+        pendingSaveFile = null
+        val dest: Uri? = if (resultCode == Activity.RESULT_OK) data?.data else null
+        if (res == null || src == null || dest == null) {
+            res?.success(false)
+            return
+        }
+        val ok = try {
+            contentResolver.openOutputStream(dest)?.use { out ->
+                src.inputStream().use { it.copyTo(out) }
+            }
+            true
+        } catch (t: Throwable) {
+            Log.w("PKM_DBG", "saveFile copy failed", t)
+            false
+        }
+        res.success(ok)
     }
 
     private fun requestPinShortcut(): Boolean {

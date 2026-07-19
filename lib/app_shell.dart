@@ -68,7 +68,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _handleControllerChanged() {
-    final hasUpdate = _controller.availableUpdate != null;
+    final hasUpdate = _controller.anyUpdateAvailable;
     if (_controller.rootStatus != _rootStatus || hasUpdate != _hasUpdate) {
       setState(() {
         _rootStatus = _controller.rootStatus;
@@ -329,73 +329,242 @@ class _RootDenied extends StatelessWidget {
   }
 }
 
+/// One combined update sheet for everything — the app APK and/or the kernel +
+/// OOT-modules build. A single Install downloads each (a bar per artifact),
+/// installs them (x/y), then prompts a reboot to activate the modules.
 void _showUpdateDialog(BuildContext context, AppController controller) {
-  final update = controller.availableUpdate;
-  if (update == null) return;
-
-  Future<void> install() async {
-    final err = await controller.downloadAndInstallUpdate();
-    if (!context.mounted) return;
-    if (err != null) {
-      showError(context, err);
-    } else {
-      Navigator.of(context).pop();
-      showInfo(
-        context,
-        'Update installed — reopen the app to use v${update.version}.',
-      );
-    }
-  }
+  if (!controller.anyUpdateAvailable) return;
 
   showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (context) => AnimatedBuilder(
+    builder: (dialogCtx) => AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final busy = controller.updateBusy;
-        final progress = controller.updateProgress;
+        final scheme = Theme.of(context).colorScheme;
+        final textTheme = Theme.of(context).textTheme;
+        final phase = controller.updatePhase;
+        final busy = controller.combinedUpdateBusy;
+        final app = controller.availableUpdate;
+        final kern = controller.kernelUpdateAvailable
+            ? controller.availableKernelUpdate
+            : null;
+
+        final Widget content;
+        final List<Widget> actions;
+
+        if (busy) {
+          content = Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                phase == UpdatePhase.installing
+                    ? 'Installing ${controller.installedCount}/${controller.updateTasks.length}…'
+                    : 'Downloading…',
+                style: textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 14),
+              for (final t in controller.updateTasks)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _TaskProgress(
+                    task: t,
+                    installing: phase == UpdatePhase.installing,
+                  ),
+                ),
+            ],
+          );
+          actions = const [];
+        } else if (phase == UpdatePhase.error) {
+          content = Text(controller.combinedUpdateError ?? 'Update failed.');
+          actions = [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Close'),
+            ),
+            FilledButton(
+              onPressed: () => controller.installAllUpdates(),
+              child: const Text('Retry'),
+            ),
+          ];
+        } else if (controller.rebootPending) {
+          // Persisted across app restarts until the actual reboot (boot_id).
+          content = Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final t in controller.updateTasks)
+                _TaskLine(label: t.label, done: t.installed),
+              if (controller.updateTasks.isNotEmpty)
+                const SizedBox(height: 12),
+              Text('Installed. Reboot to activate the kernel modules.',
+                  style: textTheme.bodyMedium),
+            ],
+          );
+          actions = [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Later'),
+            ),
+            FilledButton.icon(
+              onPressed: () => controller.rebootForUpdate(),
+              icon: const Icon(Icons.restart_alt, size: 18),
+              label: const Text('Reboot'),
+            ),
+          ];
+        } else if (phase == UpdatePhase.done) {
+          content = Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final t in controller.updateTasks)
+                _TaskLine(label: t.label, done: t.installed),
+              const SizedBox(height: 12),
+              Text('Installed.', style: textTheme.bodyMedium),
+            ],
+          );
+          actions = [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Done'),
+            ),
+          ];
+        } else {
+          content = Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('The following will be downloaded and installed:',
+                  style: textTheme.bodyMedium),
+              const SizedBox(height: 10),
+              if (kern != null)
+                _TaskLine(label: 'Kernel & modules · ${kern.dateLabel}'),
+              if (app != null) _TaskLine(label: 'App · v${app.version}'),
+              if (kern != null && controller.abDevice) ...[
+                const SizedBox(height: 14),
+                Text('Flash kernel to slot',
+                    style: textTheme.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final s in controller.slots)
+                      ChoiceChip(
+                        label: Text(
+                          '${s == '_a' ? 'A' : 'B'}'
+                          '${s == controller.activeSlot ? ' · active' : ''}',
+                        ),
+                        selected: controller.selectedSlot == s,
+                        onSelected: (_) => controller.setSelectedSlot(s),
+                      ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 12),
+              Text(
+                'The device will reboot at the end to activate the kernel '
+                'modules.',
+                style: textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+            ],
+          );
+          actions = [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Later'),
+            ),
+            FilledButton.icon(
+              onPressed: () => controller.installAllUpdates(),
+              icon: const Icon(Icons.bolt, size: 18),
+              label: const Text('Install'),
+            ),
+          ];
+        }
+
         return PopScope(
           canPop: !busy,
           child: AlertDialog(
-            title: Text('Update available — v${update.version}'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (update.notes.isNotEmpty)
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 200),
-                    child: SingleChildScrollView(child: Text(update.notes)),
-                  ),
-                if (busy) ...[
-                  const SizedBox(height: 16),
-                  LinearProgressIndicator(value: progress),
-                  const SizedBox(height: 8),
-                  Text(
-                    progress == null
-                        ? 'Downloading…'
-                        : 'Downloading… ${(progress * 100).round()}%',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: busy ? null : () => Navigator.of(context).pop(),
-                child: const Text('Later'),
-              ),
-              FilledButton(
-                onPressed: busy ? null : install,
-                child: Text(busy ? 'Installing…' : 'Update'),
-              ),
-            ],
+            title: const Text('Updates available'),
+            content: SizedBox(width: double.maxFinite, child: content),
+            actions: actions,
           ),
         );
       },
     ),
   );
+}
+
+/// A labelled row for the update list — a hollow circle by default, a filled
+/// check once its artifact is installed.
+class _TaskLine extends StatelessWidget {
+  const _TaskLine({required this.label, this.done = false});
+
+  final String label;
+  final bool done;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Icon(
+            done ? Icons.check_circle : Icons.radio_button_unchecked,
+            size: 17,
+            color: done ? scheme.primary : scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A per-artifact progress bar: download percentage while downloading, then an
+/// indeterminate bar that fills to a check once the artifact is installed.
+class _TaskProgress extends StatelessWidget {
+  const _TaskProgress({required this.task, required this.installing});
+
+  final UpdateTask task;
+  final bool installing;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final done = task.installed;
+    final value = installing ? (done ? 1.0 : null) : task.downloadProgress;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(task.label,
+                  style: Theme.of(context).textTheme.bodySmall,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            if (done)
+              Icon(Icons.check_circle, size: 15, color: scheme.primary)
+            else if (!installing && task.downloadProgress != null)
+              Text('${(task.downloadProgress! * 100).round()}%',
+                  style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
+        const SizedBox(height: 5),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(value: value, minHeight: 6),
+        ),
+      ],
+    );
+  }
 }
 
 /// An attention-grabbing "Update" chip for the app bar — a filled accent pill
@@ -411,15 +580,22 @@ class _UpdatePill extends StatefulWidget {
 }
 
 class _UpdatePillState extends State<_UpdatePill>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1150),
   )..repeat(reverse: true);
 
+  // One-shot entrance: pops + fades in the first time the pill appears.
+  late final AnimationController _entry = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+  )..forward();
+
   @override
   void dispose() {
     _c.dispose();
+    _entry.dispose();
     super.dispose();
   }
 
@@ -430,10 +606,16 @@ class _UpdatePillState extends State<_UpdatePill>
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
         child: AnimatedBuilder(
-          animation: _c,
+          animation: Listenable.merge([_c, _entry]),
           builder: (context, child) {
-            final t = Curves.easeInOut.transform(_c.value);
-            return Transform.scale(scale: 1 + 0.04 * t, child: child);
+            final pulse = Curves.easeInOut.transform(_c.value);
+            final entered = Curves.easeOutBack.transform(_entry.value);
+            final opacity = Curves.easeOut.transform(_entry.value).clamp(0.0, 1.0);
+            final scale = (0.7 + 0.3 * entered) * (1 + 0.04 * pulse);
+            return Opacity(
+              opacity: opacity,
+              child: Transform.scale(scale: scale, child: child),
+            );
           },
           child: Material(
             color: scheme.primary,

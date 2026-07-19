@@ -458,15 +458,15 @@ class _FadeInSlideState extends State<FadeInSlide> with SingleTickerProviderStat
   }
 }
 
-/// Reveals a child by "unfolding" it: its height opens from zero (anchored at
-/// the top) while it fades and eases up to full scale, so a staggered list
-/// appears to unfold itself downward. Used for the plugged-in adapter rows.
-class UnfoldIn extends StatefulWidget {
-  const UnfoldIn({
+/// Reveals a row by fading and easing it up into its slot. It does NOT animate
+/// height — the parent's single AnimatedSize owns that, so nested size
+/// animators can't fight and jitter the list.
+class RowReveal extends StatefulWidget {
+  const RowReveal({
     super.key,
     required this.child,
     this.delay = Duration.zero,
-    this.duration = const Duration(milliseconds: 380),
+    this.duration = const Duration(milliseconds: 340),
   });
 
   final Widget child;
@@ -474,20 +474,18 @@ class UnfoldIn extends StatefulWidget {
   final Duration duration;
 
   @override
-  State<UnfoldIn> createState() => _UnfoldInState();
+  State<RowReveal> createState() => _RowRevealState();
 }
 
-class _UnfoldInState extends State<UnfoldIn> with SingleTickerProviderStateMixin {
+class _RowRevealState extends State<RowReveal> with SingleTickerProviderStateMixin {
   late final AnimationController _c =
       AnimationController(vsync: this, duration: widget.duration);
-  late final Animation<double> _size =
-      CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
-  late final Animation<double> _fade = CurvedAnimation(
-    parent: _c,
-    curve: const Interval(0.15, 1.0, curve: Curves.easeOut),
-  );
-  late final Animation<double> _scale = Tween(begin: 0.95, end: 1.0)
-      .animate(CurvedAnimation(parent: _c, curve: Curves.easeOutCubic));
+  late final Animation<double> _fade =
+      CurvedAnimation(parent: _c, curve: Curves.easeOut);
+  late final Animation<Offset> _slide = Tween(
+    begin: const Offset(0, 0.12),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: _c, curve: Curves.easeOutCubic));
 
   @override
   void initState() {
@@ -509,17 +507,9 @@ class _UnfoldInState extends State<UnfoldIn> with SingleTickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
-    return SizeTransition(
-      sizeFactor: _size,
-      alignment: Alignment.topCenter,
-      child: FadeTransition(
-        opacity: _fade,
-        child: ScaleTransition(
-          scale: _scale,
-          alignment: Alignment.topCenter,
-          child: widget.child,
-        ),
-      ),
+    return FadeTransition(
+      opacity: _fade,
+      child: SlideTransition(position: _slide, child: widget.child),
     );
   }
 }
