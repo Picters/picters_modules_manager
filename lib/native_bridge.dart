@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 /// Small native-side helper that doesn't fit the root-shell model: requesting
@@ -5,6 +7,15 @@ import 'package:flutter/services.dart';
 class NativeBridge {
   static const MethodChannel _channel =
       MethodChannel('com.picters.modulesmanager/system');
+
+  static const EventChannel _usbEvents =
+      EventChannel('com.picters.modulesmanager/system/usb_events');
+
+  /// Emits whenever a USB device is attached or detached (a system broadcast),
+  /// so the UI can refresh the scan immediately instead of waiting for the next
+  /// 1–5s poll tick. Purely an accelerator — the poll is still the safety net.
+  static Stream<void> usbEvents() =>
+      _usbEvents.receiveBroadcastStream().map((_) {});
 
   /// Asks the launcher to pin a shortcut for this app. Returns false if the
   /// launcher doesn't support it (or API < 26) — the caller should fall back

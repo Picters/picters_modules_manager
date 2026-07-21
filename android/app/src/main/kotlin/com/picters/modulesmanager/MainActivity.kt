@@ -1,18 +1,23 @@
 package com.picters.modulesmanager
 
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
+import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.topjohnwu.superuser.ipc.RootService
 import io.flutter.embedding.android.FlutterActivity
@@ -23,6 +28,7 @@ import java.io.File
 
 private const val CHANNEL = "com.picters.modulesmanager/system"
 private const val ROOT_EVENTS = "com.picters.modulesmanager/system/root_events"
+private const val USB_EVENTS = "com.picters.modulesmanager/system/usb_events"
 private const val REQ_SAVE_DOC = 4201
 
 class MainActivity : FlutterActivity() {
@@ -38,6 +44,10 @@ class MainActivity : FlutterActivity() {
     private var kernelService: IKernelService? = null
     private var rootSink: EventChannel.EventSink? = null
     private var bindPending: MethodChannel.Result? = null
+
+    // Live only while Dart is listening to USB_EVENTS: forwards USB attach/detach
+    // system broadcasts so the scan refreshes the instant an adapter is plugged.
+    private var usbReceiver: BroadcastReceiver? = null
 
     private val rootConn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
@@ -90,6 +100,34 @@ class MainActivity : FlutterActivity() {
 
                 override fun onCancel(arguments: Any?) {
                     rootSink = null
+                }
+            },
+        )
+
+        EventChannel(messenger, USB_EVENTS).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    val r = object : BroadcastReceiver() {
+                        override fun onReceive(context: Context?, intent: Intent?) {
+                            mainHandler.post { events?.success(intent?.action ?: "usb") }
+                        }
+                    }
+                    usbReceiver = r
+                    val filter = IntentFilter().apply {
+                        addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+                        addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+                    }
+                    // These are protected system broadcasts, so NOT_EXPORTED
+                    // satisfies the Android 14+ registration rule without opening
+                    // the receiver to other apps.
+                    ContextCompat.registerReceiver(
+                        this@MainActivity, r, filter, ContextCompat.RECEIVER_NOT_EXPORTED,
+                    )
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    usbReceiver?.let { runCatching { unregisterReceiver(it) } }
+                    usbReceiver = null
                 }
             },
         )

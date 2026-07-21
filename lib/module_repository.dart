@@ -55,11 +55,18 @@ List<WifiInterface> parseIfaceLines(Iterable<String> lines) {
 }
 
 class ModuleRepository {
+  /// [runner] defaults to the real root layer ([DefaultRootRunner]); tests pass
+  /// a fake to assert on the emitted scripts and stub results.
+  ModuleRepository([RootRunner runner = const DefaultRootRunner()])
+      : _shell = runner;
+
+  final RootRunner _shell;
+
   /// One `su` round-trip for the whole picture: module files, /proc/modules,
   /// USB devices, and wireless interfaces. Kept to a single call so 1s polling
   /// stays cheap.
   Future<SystemState> scan() async {
-    final r = await RootShell.run(
+    final r = await _shell.run(
       'echo $_mModules; '
       '[ -d $kModulesDir ] && echo DIR_OK; '
       'ls $kModulesDir/*.ko 2>/dev/null; '
@@ -153,11 +160,11 @@ class ModuleRepository {
 
   /// Whether the boot-time loader is currently allowed to auto-load modules.
   Future<bool> bootLoadEnabled() async {
-    final r = await RootShell.run("[ -f '$kBootLoadFlag' ] && echo Y || echo N");
+    final r = await _shell.run("[ -f '$kBootLoadFlag' ] && echo Y || echo N");
     return r.stdout.contains('Y');
   }
 
-  Future<void> setBootLoadEnabled(bool enabled) => RootShell.run(
+  Future<void> setBootLoadEnabled(bool enabled) => _shell.run(
         enabled
             ? "mkdir -p '$kBootConfigDir' && touch '$kBootLoadFlag'"
             : "rm -f '$kBootLoadFlag'",
@@ -205,7 +212,7 @@ class ModuleRepository {
     b.writeln('  echo DMESG_TAIL:');
     b.writeln("  dmesg 2>/dev/null | grep -iE 'cfg80211|mac80211' | tail -n 15");
     b.writeln('fi');
-    return RootShell.run(b.toString());
+    return _shell.run(b.toString());
   }
 
   /// Live return to stock Wi-Fi — no reboot. Switching to Inject only unloads
@@ -256,11 +263,11 @@ class ModuleRepository {
     b.writeln('  echo DMESG_TAIL:');
     b.writeln("  dmesg 2>/dev/null | grep -iE 'qca|cnss|cfg80211|wlan' | tail -n 15");
     b.writeln('fi');
-    return RootShell.run(b.toString(), timeout: const Duration(seconds: 70));
+    return _shell.run(b.toString(), timeout: const Duration(seconds: 70));
   }
 
   /// A hard reboot — the fallback when [switchToStock] can't restore stock live.
-  Future<void> reboot() => RootShell.run('reboot', timeout: const Duration(seconds: 3));
+  Future<void> reboot() => _shell.run('reboot', timeout: const Duration(seconds: 3));
 
   /// Hand a loaded adapter back to Settings as a managed station: bounce Wi-Fi,
   /// optionally reload the driver, restart wificond, re-enable (see inline why).
@@ -333,7 +340,7 @@ class ModuleRepository {
     b.writeln('svc wifi enable 2>/dev/null');
     b.writeln('sleep 2');
     b.writeln('if ip link show "\$IF" >/dev/null 2>&1; then echo "OK_RECONFIG:\$IF"; else echo NO_IFACE; fi');
-    return RootShell.run(b.toString(), timeout: const Duration(seconds: 45));
+    return _shell.run(b.toString(), timeout: const Duration(seconds: 45));
   }
 
   /// The dmesg tail any of switchToStock/switchToInject/setLoaded append
@@ -365,11 +372,11 @@ class ModuleRepository {
         b.writeln('rmmod mac80211 2>/dev/null');
         b.writeln('rmmod cfg80211 2>/dev/null');
         b.writeln("insmod '$kModulesDir/cfg80211.ko' 2>&1");
-        return RootShell.run(b.toString());
+        return _shell.run(b.toString());
       }
-      return RootShell.run(_insmodWithRetryScript(module));
+      return _shell.run(_insmodWithRetryScript(module));
     }
-    return RootShell.run("rmmod '${module.krName}' 2>&1");
+    return _shell.run("rmmod '${module.krName}' 2>&1");
   }
 
   /// rndis_host needs cdc_ether's usbnet_generic_cdc_bind / usbnet_cdc_zte_rx_fixup
@@ -400,7 +407,7 @@ class ModuleRepository {
     b.writeln('  echo DMESG_TAIL:');
     b.writeln("  dmesg 2>/dev/null | grep -iE 'rndis|cdc_ether|Unknown symbol' | tail -n 12");
     b.writeln('fi');
-    return RootShell.run(b.toString(), timeout: const Duration(seconds: 40));
+    return _shell.run(b.toString(), timeout: const Duration(seconds: 40));
   }
 
   /// insmod several modules in dependency order (deepest dependency first),
@@ -408,7 +415,7 @@ class ModuleRepository {
   /// won't come up, reporting it as `CHAIN_FAIL:<name>`. The app resolves the
   /// order itself (see module_dependencies.dart) — there's no modules.dep on
   /// this device for `modprobe` to use.
-  Future<ShellResult> loadChain(List<ModuleInfo> ordered) => RootShell.run(
+  Future<ShellResult> loadChain(List<ModuleInfo> ordered) => _shell.run(
         _loadChainScript(ordered),
         timeout: Duration(seconds: 20 + 10 * ordered.length),
       );
@@ -438,7 +445,7 @@ class ModuleRepository {
   /// rmmod several modules in order (outermost users first), stopping at the
   /// first that won't unload — used to clear a shared module's dependents
   /// before removing it, instead of failing with a bare "Module is in use".
-  Future<ShellResult> unloadChain(List<ModuleInfo> ordered) => RootShell.run(
+  Future<ShellResult> unloadChain(List<ModuleInfo> ordered) => _shell.run(
         _unloadChainScript(ordered),
         timeout: Duration(seconds: 15 + 5 * ordered.length),
       );
@@ -486,7 +493,7 @@ class ModuleRepository {
   /// On-demand dmesg tail for one module — run only when the user taps a row's
   /// error icon, never as part of a toggle (see [_insmodWithRetryScript]).
   Future<String> moduleDmesg(ModuleInfo module) async {
-    final r = await RootShell.run(
+    final r = await _shell.run(
       "dmesg 2>/dev/null | grep -iE '${module.krName}' | tail -n 20",
     );
     return r.stdout.trim();
@@ -520,7 +527,7 @@ class ModuleRepository {
     b.writeln(r'[ -n "$C" ] && chcon -R "$C" "$D" 2>/dev/null');
     b.writeln('chmod 660 "\$OUT" 2>/dev/null');
     b.writeln('echo "\$OUT"');
-    final r = await RootShell.run(b.toString(), timeout: const Duration(seconds: 60));
+    final r = await _shell.run(b.toString(), timeout: const Duration(seconds: 60));
     if (!r.ok) return null;
     final path = r.stdout.trim().split('\n').last.trim();
     return path.endsWith('.tar.gz') ? path : null;
@@ -528,7 +535,7 @@ class ModuleRepository {
 
   /// Deletes a collected archive — the "discard" path when the user is done.
   Future<void> deleteDebugLogs(String path) =>
-      RootShell.run("rm -f '$path'");
+      _shell.run("rm -f '$path'");
 
   // ── Kernel / OOT-modules update delivery ────────────────────────────────
 
@@ -538,7 +545,7 @@ class ModuleRepository {
   /// The versionCode of the currently-installed modules pack (module.prop),
   /// used to gate features on a matching kernel. 0 if not installed/unstamped.
   Future<int> installedModulesVersionCode() async {
-    final r = await RootShell.run(
+    final r = await _shell.run(
       "grep '^versionCode=' '$_modProp' 2>/dev/null | head -1 | cut -d= -f2",
     );
     return int.tryParse(r.stdout.trim()) ?? 0;
@@ -547,7 +554,7 @@ class ModuleRepository {
   /// Copies a downloaded zip into /sdcard/Download so the user can flash it
   /// themselves in KernelSU/Magisk. Uses root since scoped storage blocks it.
   Future<bool> copyToDownloads(String srcPath, String name) async {
-    final r = await RootShell.run(
+    final r = await _shell.run(
       "mkdir -p /sdcard/Download && cp '$srcPath' '/sdcard/Download/$name' && "
       "chmod 664 '/sdcard/Download/$name' && echo OK",
     );
@@ -556,7 +563,7 @@ class ModuleRepository {
 
   /// Installs the OOT-modules zip as a KernelSU (or Magisk) module — the safe
   /// auto path (no boot flashing). A reboot is required to activate it.
-  Future<ShellResult> installModuleZip(String zipPath) => RootShell.run(
+  Future<ShellResult> installModuleZip(String zipPath) => _shell.run(
         "if command -v ksud >/dev/null 2>&1; then ksud module install '$zipPath' 2>&1; "
         "elif command -v magisk >/dev/null 2>&1; then magisk --install-module '$zipPath' 2>&1; "
         "else echo NO_MODULE_MANAGER; fi",
@@ -566,21 +573,21 @@ class ModuleRepository {
   /// The running kernel's release string (`uname -r`) — the app checks it for
   /// the "picters" tag to warn when it's running on a foreign kernel.
   Future<String> kernelRelease() async {
-    final r = await RootShell.run('uname -r 2>/dev/null');
+    final r = await _shell.run('uname -r 2>/dev/null');
     return r.stdout.trim();
   }
 
   /// A UUID that changes on every boot — lets the app tell whether a reboot has
   /// happened since a pending update was installed.
   Future<String> currentBootId() async {
-    final r = await RootShell.run('cat /proc/sys/kernel/random/boot_id 2>/dev/null');
+    final r = await _shell.run('cat /proc/sys/kernel/random/boot_id 2>/dev/null');
     return r.stdout.trim();
   }
 
   /// (isAbDevice, activeSlotSuffix). isAb is true only when both boot_a and
   /// boot_b exist; activeSlot is "_a"/"_b" (empty on non-slot devices).
   Future<(bool, String)> slotInfo() async {
-    final r = await RootShell.run(
+    final r = await _shell.run(
       'A=\$(getprop ro.boot.slot_suffix); '
       'if ls /dev/block/by-name/boot_a >/dev/null 2>&1 && '
       'ls /dev/block/by-name/boot_b >/dev/null 2>&1; then echo "AB \$A"; '
@@ -610,7 +617,7 @@ class ModuleRepository {
     b.writeln('sh "\$UB" 3 1 "$zipPath" 2>&1');
     b.writeln('echo "AK3_EXIT:\$?"');
     b.writeln('rm -rf "\$AK"');
-    return RootShell.run(b.toString(), timeout: const Duration(seconds: 180));
+    return _shell.run(b.toString(), timeout: const Duration(seconds: 180));
   }
 
   /// The insmod/rmmod output itself, excluding the DMESG_TAIL section that

@@ -1,42 +1,41 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
 import 'module_dependencies.dart';
 import 'module_info.dart';
 import 'module_repository.dart';
-import 'native_bridge.dart';
+import 'perf_controller.dart';
 import 'root_shell.dart';
-import 'update_checker.dart';
+import 'settings_controller.dart';
+import 'update_controller.dart';
 import 'usb_devices.dart';
 
 enum RootStatus { checking, granted, denied }
 
-/// Where the combined-update flow is: idle, downloading each artifact,
-/// installing them, done (reboot pending), or errored out.
-enum UpdatePhase { idle, downloading, installing, done, error }
-
-/// One installable artifact in the combined-update flow (the app APK or the
-/// kernel/modules build), with its live download progress and install state.
-class UpdateTask {
-  UpdateTask(this.label);
-
-  final String label;
-  double? downloadProgress; // 0..1, null while starting / indeterminate
-  bool installed = false;
-
-  bool get isKernel => label.startsWith('Kernel');
-}
-
-/// Single source of truth for the UI. Owns the 1-second live poll, the root
-/// status, and all the mutating actions. Everything is funnelled through the
-/// persistent root shell, so a poll is one cheap round-trip.
+/// Single source of truth for the live system view — root status, the 1-second
+/// poll and every Wi-Fi/module/adapter action. Update delivery and Settings
+/// state live in their own notifiers ([update], [settings]) so those screens
+/// don't rebuild on the scan; everything here funnels through the persistent
+/// root shell, so a poll is one cheap round-trip.
 class AppController extends ChangeNotifier {
-  AppController(this._repo);
+  AppController(ModuleRepository repo)
+      : _repo = repo,
+        update = UpdateController(repo),
+        settings = SettingsController(repo),
+        perf = PerfController();
 
   final ModuleRepository _repo;
-  final UpdateChecker _updates = UpdateChecker();
+
+  /// Update flow (self-update APK + kernel/OOT-modules build). Its own notifier
+  /// so the update dialog and app-bar pill don't rebuild on the 1s system scan.
+  final UpdateController update;
+
+  /// Settings tab state (boot-load flag, debug-log bundler), likewise isolated.
+  final SettingsController settings;
+
+  /// Performance tab state (CPU/GPU frequency caps), likewise isolated.
+  final PerfController perf;
 
   RootStatus rootStatus = RootStatus.checking;
   SystemState state = SystemState.empty;
@@ -75,301 +74,13 @@ class AppController extends ChangeNotifier {
       unawaited(RootShell.initBinder());
       await _pollOnce(force: true);
       _startTimer();
-      unawaited(_checkForUpdate());
-      unawaited(_checkForKernelUpdate());
-      unawaited(_refreshInstalledModulesVersion());
-      unawaited(_refreshSlotInfo());
-      unawaited(_refreshRebootPending());
-      unawaited(_refreshBootLoadEnabled());
+      unawaited(update.init());
+      unawaited(settings.init());
+      unawaited(perf.init());
       unawaited(_checkKernelAuthentic());
     } else {
       _startRootRecheckTimer();
     }
-  }
-
-  // ── Boot-time module autoload toggle ─────────────────────────────────────
-
-  bool bootLoadEnabled = false;
-  bool bootLoadBusy = false;
-
-  Future<void> _refreshBootLoadEnabled() async {
-    final v = await _repo.bootLoadEnabled();
-    if (_disposed) return;
-    bootLoadEnabled = v;
-    notifyListeners();
-  }
-
-  Future<void> setBootLoadEnabled(bool value) async {
-    if (bootLoadBusy || bootLoadEnabled == value) return;
-    bootLoadBusy = true;
-    notifyListeners();
-    try {
-      await _repo.setBootLoadEnabled(value);
-      bootLoadEnabled = await _repo.bootLoadEnabled();
-    } finally {
-      bootLoadBusy = false;
-      notifyListeners();
-    }
-  }
-
-  // ── Self-update (GitHub Releases, independent of the module zip) ────────
-
-  UpdateInfo? availableUpdate;
-
-  Future<void> _checkForUpdate() async {
-    final update = await _updates.check();
-    if (update != null) {
-      availableUpdate = update;
-      notifyListeners();
-    }
-  }
-
-  /// Installs an already-downloaded APK via root; returns an error string or
-  /// null. `pm install -r -d` swaps the running app out from under itself, so
-  /// the combined flow does this LAST. installd can't read the app's private
-  /// cache, so the APK is staged in /data/local/tmp first.
-  Future<String?> _installApk(File apk) async {
-    const dest = '/data/local/tmp/pmm_update.apk';
-    final result = await RootShell.run(
-      "cp '${apk.path}' '$dest' && chmod 644 '$dest' && "
-      "pm install -r -d '$dest'; rm -f '$dest'",
-      timeout: const Duration(seconds: 120),
-    );
-    if (!result.stdout.contains('Success')) return _installErrorMessage(result);
-    return null;
-  }
-
-  // ── Combined update (App APK + Kernel/OOT-modules) in one Install flow ────
-
-  KernelUpdateInfo? availableKernelUpdate;
-  int installedModulesVersionCode = 0;
-
-  // A/B slot selection for the kernel flash (default: the active slot).
-  bool abDevice = false;
-  String activeSlot = '';
-  String selectedSlot = '';
-
-  UpdatePhase updatePhase = UpdatePhase.idle;
-  List<UpdateTask> updateTasks = [];
-  bool combinedUpdateBusy = false;
-  String? combinedUpdateError;
-  bool rebootPending = false;
-
-  /// The slots the user can flash to ("_a", "_b") — empty on a non-A/B device.
-  List<String> get slots => abDevice ? const ['_a', '_b'] : const [];
-
-  void setSelectedSlot(String slot) {
-    if (slot == selectedSlot) return;
-    selectedSlot = slot;
-    notifyListeners();
-  }
-
-  Future<void> _refreshSlotInfo() async {
-    final (ab, slot) = await _repo.slotInfo();
-    if (_disposed) return;
-    abDevice = ab;
-    activeSlot = slot;
-    if (selectedSlot.isEmpty) selectedSlot = slot;
-    notifyListeners();
-  }
-
-  /// A strictly newer kernel/modules build than the installed one is offered.
-  bool get kernelUpdateAvailable =>
-      availableKernelUpdate != null &&
-      availableKernelUpdate!.versionCode > installedModulesVersionCode;
-
-  /// Anything to act on — the app APK, a kernel build, or a reboot still owed
-  /// from an install done earlier this boot.
-  bool get anyUpdateAvailable =>
-      rebootPending || availableUpdate != null || kernelUpdateAvailable;
-
-  int get installedCount => updateTasks.where((t) => t.installed).length;
-
-  /// Marker file (app-private) holding the boot_id at install time — its
-  /// presence + a matching boot_id means the reboot is still owed.
-  Future<File?> _rebootMarker() async {
-    final dir = await NativeBridge.filesDir();
-    return dir == null ? null : File('$dir/reboot_pending');
-  }
-
-  /// Re-derives [rebootPending] on launch: true only if an install this boot
-  /// left the marker AND we haven't rebooted since (boot_id still matches).
-  Future<void> _refreshRebootPending() async {
-    final f = await _rebootMarker();
-    if (f == null || _disposed || !await f.exists()) return;
-    final stored = (await f.readAsString()).trim();
-    final current = await _repo.currentBootId();
-    if (_disposed) return;
-    if (stored.isNotEmpty && stored == current) {
-      rebootPending = true;
-    } else {
-      try {
-        await f.delete();
-      } catch (_) {}
-      rebootPending = false;
-    }
-    notifyListeners();
-  }
-
-  Future<void> _persistRebootPending() async {
-    final f = await _rebootMarker();
-    if (f == null) return;
-    try {
-      await f.writeAsString(await _repo.currentBootId());
-    } catch (_) {}
-  }
-
-  Future<void> _refreshInstalledModulesVersion() async {
-    final v = await _repo.installedModulesVersionCode();
-    if (_disposed) return;
-    installedModulesVersionCode = v;
-    notifyListeners();
-  }
-
-  Future<void> _checkForKernelUpdate() async {
-    final info = await _updates.checkKernel();
-    if (_disposed) return;
-    if (info != null) {
-      availableKernelUpdate = info;
-      notifyListeners();
-    }
-  }
-
-  /// Downloads and installs everything available in one pass: the kernel
-  /// OOT-modules zip (via KernelSU/Magisk; the kernel zip is dropped in
-  /// /sdcard/Download for a manual flash), then the app APK. Modules go first
-  /// (they can't kill us); the APK is last because `pm install` may restart the
-  /// app. A reboot afterwards activates the modules. UI reads [updateTasks] /
-  /// [updatePhase]; nothing is flashed to the boot image by the app.
-  Future<void> installAllUpdates() async {
-    if (combinedUpdateBusy) return;
-    final app = availableUpdate;
-    final kern = kernelUpdateAvailable ? availableKernelUpdate : null;
-    if (app == null && kern == null) return;
-
-    combinedUpdateBusy = true;
-    combinedUpdateError = null;
-    rebootPending = false;
-    updateTasks = [
-      if (kern != null) UpdateTask('Kernel & modules · ${kern.dateLabel}'),
-      if (app != null) UpdateTask('App · v${app.version}'),
-    ];
-    updatePhase = UpdatePhase.downloading;
-    notifyListeners();
-
-    final tmp = Directory.systemTemp.path;
-    File? modsFile, kernFile, apkFile;
-    try {
-      // ── Download phase ──
-      if (kern != null) {
-        final task = updateTasks.firstWhere((t) => t.isKernel);
-        modsFile = await _updates.downloadZip(
-            kern.modulesUrl, '$tmp/${kern.modulesName}', onProgress: (r, t) {
-          task.downloadProgress = t > 0 ? r / t : null;
-          notifyListeners();
-        });
-        if (kern.kernelUrl != null && kern.kernelName != null) {
-          kernFile = await _updates.downloadZip(
-              kern.kernelUrl!, '$tmp/${kern.kernelName}', onProgress: (r, t) {
-            task.downloadProgress = t > 0 ? r / t : null;
-            notifyListeners();
-          });
-        }
-        task.downloadProgress = 1;
-        notifyListeners();
-      }
-      if (app != null) {
-        final task = updateTasks.firstWhere((t) => !t.isKernel);
-        apkFile = await _updates.download(app.apkUrl, onProgress: (r, t) {
-          task.downloadProgress = t > 0 ? r / t : null;
-          notifyListeners();
-        });
-        task.downloadProgress = 1;
-        notifyListeners();
-      }
-
-      // ── Install phase ──
-      updatePhase = UpdatePhase.installing;
-      notifyListeners();
-
-      if (kern != null && modsFile != null) {
-        final res = await _repo.installModuleZip(modsFile.path);
-        if (res.stdout.contains('NO_MODULE_MANAGER')) {
-          throw Exception('No KernelSU/Magisk CLI found to install the module.');
-        }
-        if (!res.ok) {
-          throw Exception('Module install failed: ${res.errorSummary}');
-        }
-        // Flash the boot image (AnyKernel3) to the chosen slot, and keep a copy
-        // in Download as a manual-flash fallback.
-        if (kernFile != null && kern.kernelName != null) {
-          final inactive = abDevice &&
-              selectedSlot.isNotEmpty &&
-              selectedSlot != activeSlot;
-          final fres =
-              await _repo.flashKernelZip(kernFile.path, inactiveSlot: inactive);
-          if (!fres.stdout.contains('AK3_EXIT:0') ||
-              fres.stdout.toLowerCase().contains('abort')) {
-            throw Exception('Kernel flash failed: ${fres.errorSummary}');
-          }
-          await _repo.copyToDownloads(kernFile.path, kern.kernelName!);
-        }
-        updateTasks.firstWhere((t) => t.isKernel).installed = true;
-        rebootPending = true;
-        await _persistRebootPending();
-        notifyListeners();
-      }
-      if (app != null && apkFile != null) {
-        final err = await _installApk(apkFile);
-        if (err != null) throw Exception(err);
-        updateTasks.firstWhere((t) => !t.isKernel).installed = true;
-        availableUpdate = null;
-        notifyListeners();
-      }
-
-      updatePhase = UpdatePhase.done;
-      notifyListeners();
-    } catch (e) {
-      combinedUpdateError = '$e';
-      updatePhase = UpdatePhase.error;
-      notifyListeners();
-    } finally {
-      for (final f in [modsFile, kernFile, apkFile]) {
-        try {
-          await f?.delete();
-        } catch (_) {}
-      }
-      combinedUpdateBusy = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> rebootForUpdate() => _repo.reboot();
-
-  /// Maps common INSTALL_FAILED_* codes to plain language.
-  String _installErrorMessage(ShellResult r) {
-    final lower = r.stdout.toLowerCase();
-    if (lower.contains('signatures do not match') ||
-        lower.contains('update_incompatible') ||
-        lower.contains('inconsistent_certificates') ||
-        lower.contains('no_matching_signatures')) {
-      return 'Signature mismatch — the installed build was signed with a '
-          'different key than this release. Uninstall the current app, then '
-          'install the update manually.';
-    }
-    if (lower.contains('version_downgrade') || lower.contains('older_sdk')) {
-      return 'This release is older than the version already installed.';
-    }
-    if (lower.contains('insufficient_storage')) {
-      return 'Not enough free storage to install the update.';
-    }
-    if (lower.contains('invalid_apk') ||
-        lower.contains('parse_failed') ||
-        lower.contains('no_certificates')) {
-      return 'The downloaded update is invalid or corrupt.';
-    }
-    final fail = RegExp(r'Failure \[[^\]]*\]').firstMatch(r.stdout);
-    return 'Install failed: ${fail?.group(0) ?? r.errorSummary}';
   }
 
   void setForeground(bool value) {
@@ -427,12 +138,9 @@ class AppController extends ChangeNotifier {
       unawaited(RootShell.initBinder());
       await _pollOnce(force: true);
       _startTimer();
-      unawaited(_checkForUpdate());
-      unawaited(_checkForKernelUpdate());
-      unawaited(_refreshInstalledModulesVersion());
-      unawaited(_refreshSlotInfo());
-      unawaited(_refreshRebootPending());
-      unawaited(_refreshBootLoadEnabled());
+      unawaited(update.init());
+      unawaited(settings.init());
+      unawaited(perf.init());
       unawaited(_checkKernelAuthentic());
     } else {
       notifyListeners();
@@ -453,7 +161,8 @@ class AppController extends ChangeNotifier {
         notifyListeners();
         await _pollOnce(force: true);
         _startTimer();
-        unawaited(_refreshBootLoadEnabled());
+        unawaited(settings.init());
+        unawaited(perf.init());
       }
     });
   }
@@ -658,16 +367,6 @@ class AppController extends ChangeNotifier {
   /// error icon, so a failed toggle never holds the serialized root shell
   /// collecting logs (which used to stall the next module's toggle).
   Future<String> fetchModuleDmesg(ModuleInfo module) => _repo.moduleDmesg(module);
-
-  /// Debug bundle (last_kmsg + dmesg + logcat) for the Settings ▸ Debug block.
-  /// Lands in the app's own internal files dir so it's readable without root.
-  Future<String?> collectDebugLogs() async {
-    final dir = await NativeBridge.filesDir();
-    if (dir == null) return null;
-    return _repo.collectDebugLogs(dir);
-  }
-
-  Future<void> deleteDebugLogs(String path) => _repo.deleteDebugLogs(path);
 
   // ── Dependency-aware load / unload ──────────────────────────────────────
 
@@ -896,6 +595,9 @@ class AppController extends ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     _timer = null;
+    update.dispose();
+    settings.dispose();
+    perf.dispose();
     super.dispose();
   }
 }

@@ -1,0 +1,17 @@
+# Release signing config for the app. Copy this file to `android/key.properties`
+# (which is git-ignored) and fill in your own values. When it's present, the
+# release build is signed with your key; when it's absent, the build falls back
+# to the debug keys so `flutter build apk` still works without any setup.
+#
+# Generate a keystore once (keep the .jks safe and backed up — losing it means
+# you can no longer ship self-updates over an existing install):
+#
+#   keytool -genkey -v -keystore ~/picters-release.jks \
+#       -keyalg RSA -keysize 2048 -validity 10000 -alias picters
+#
+# storeFile may be absolute, or relative to the android/app directory.
+
+storePassword=changeme
+keyPassword=changeme
+keyAlias=picters
+storeFile=picters-release.jks

@@ -128,6 +128,12 @@ class UpdateChecker {
           final name = asset['name'] as String? ?? '';
           final url = asset['browser_download_url'] as String?;
           if (url == null || !name.toLowerCase().endsWith('.zip')) continue;
+          // These names become file paths and shell arguments as root (module
+          // install, /sdcard/Download copy, AnyKernel3 unzip/flash), so refuse
+          // any that isn't a plain filename — a crafted release asset otherwise
+          // gives shell injection. A skipped kernel asset just drops the flash;
+          // a skipped modules asset skips the whole release below.
+          if (!isSafeAssetName(name)) continue;
           if (name.contains('OOT-Modules')) {
             modulesUrl = url;
             modulesName = name;
@@ -260,6 +266,14 @@ class UpdateChecker {
     }
   }
 }
+
+/// A release asset name safe to splice into a root shell command and use as a
+/// file path: a single path segment of only letters, digits, dot, underscore,
+/// plus and hyphen. Rejects anything with quotes, `$`, `;`, whitespace, a
+/// slash, or other shell metacharacters — and the empty string. Pure, so the
+/// injection guard in [UpdateChecker.checkKernel] can be unit-tested.
+bool isSafeAssetName(String name) =>
+    name.isNotEmpty && RegExp(r'^[A-Za-z0-9._+-]+$').hasMatch(name);
 
 /// True when [bytes] begins with the ZIP local-file-header magic `PK\x03\x04`
 /// — the first bytes of every APK. Pure so it can be unit-tested.
