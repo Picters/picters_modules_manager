@@ -210,6 +210,28 @@ class StreamQueue<T> {
   Future<void> cancel({bool immediate = false}) => _sub.cancel();
 }
 
+/// The one capability [ModuleRepository] needs from the root layer: run a
+/// script and get its [ShellResult]. Injecting this (instead of calling the
+/// [RootShell] statics directly) lets tests drive the repository with a fake
+/// runner — no device, no real `su` — and assert on the exact scripts it emits.
+abstract interface class RootRunner {
+  Future<ShellResult> run(String script, {Duration timeout});
+}
+
+/// Production [RootRunner]: delegates straight to the [RootShell] facade
+/// (Binder service when up, persistent `su` pipe otherwise). The default the
+/// repository uses in the running app.
+class DefaultRootRunner implements RootRunner {
+  const DefaultRootRunner();
+
+  @override
+  Future<ShellResult> run(
+    String script, {
+    Duration timeout = const Duration(seconds: 30),
+  }) =>
+      RootShell.run(script, timeout: timeout);
+}
+
 /// Facade used across the app. Routes each command through the AIDL/Binder root
 /// service when enabled and connected (concurrent, no head-of-line blocking),
 /// and otherwise — or on any Binder failure — through the persistent `su` pipe.

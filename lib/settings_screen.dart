@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'app_controller.dart';
 import 'native_bridge.dart';
+import 'settings_controller.dart';
 import 'widgets.dart';
 
 /// App settings — the third tab in the bottom dock. Home for the boot-time
@@ -11,7 +11,7 @@ import 'widgets.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.controller});
 
-  final AppController controller;
+  final SettingsController controller;
 
   Future<void> _setBootLoad(bool value) async {
     HapticFeedback.selectionClick();
@@ -31,8 +31,6 @@ class SettingsScreen extends StatelessWidget {
           ),
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
           children: [
-            const SectionHeader(icon: Icons.flash_on, label: 'Startup'),
-            const SizedBox(height: 12),
             _BootLoadCard(
               enabled: controller.bootLoadEnabled,
               busy: controller.bootLoadBusy,
@@ -92,7 +90,7 @@ class _BootLoadCard extends StatelessWidget {
 class _DebugCard extends StatefulWidget {
   const _DebugCard({required this.controller});
 
-  final AppController controller;
+  final SettingsController controller;
 
   @override
   State<_DebugCard> createState() => _DebugCardState();

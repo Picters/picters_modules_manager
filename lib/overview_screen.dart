@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -25,15 +27,62 @@ class OverviewScreen extends StatelessWidget {
     final err = await controller.setWifiMode(target);
     if (!context.mounted) return;
     if (err != null) {
-      showError(context, err);
-      if (controller.lastWifiSwitchDiagnostics != null) {
-        showDiagnosticsDialog(context, controller.lastWifiSwitchDiagnostics!);
+      // A stock switch that couldn't come back live arms the reboot fallback —
+      // surface that as a clear "reboot needed" prompt rather than a raw error.
+      if (controller.lastSwitchNeedsReboot) {
+        await _showRebootNeededDialog(context);
+      } else {
+        showError(context, err);
+        if (controller.lastWifiSwitchDiagnostics != null) {
+          showDiagnosticsDialog(context, controller.lastWifiSwitchDiagnostics!);
+        }
       }
     } else {
       showInfo(
         context,
         target == WifiMode.stock ? 'Stock Wi-Fi restored.' : 'Inject mode enabled.',
       );
+    }
+  }
+
+  /// Shown when a live return to Stock failed: the injection stack is still up,
+  /// and only a reboot brings the built-in Wi-Fi back. Offers Reboot now, Later
+  /// (the hero card stays armed for reboot), or the raw dmesg via Details.
+  Future<void> _showRebootNeededDialog(BuildContext context) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.restart_alt),
+        title: const Text('Reboot needed'),
+        content: const Text(
+          "Stock Wi-Fi couldn't be restored without a restart. Injection stays "
+          'active until you reboot — reboot now to bring the built-in Wi-Fi back.',
+        ),
+        actions: [
+          if (controller.lastWifiSwitchDiagnostics != null)
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop(false);
+                showDiagnosticsDialog(
+                    context, controller.lastWifiSwitchDiagnostics!);
+              },
+              child: const Text('Details'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Later'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.restart_alt, size: 18),
+            label: const Text('Reboot'),
+          ),
+        ],
+      ),
+    );
+    if (proceed == true) {
+      HapticFeedback.mediumImpact();
+      controller.rebootDevice();
     }
   }
 
@@ -239,10 +288,13 @@ class _WifiHeroCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final inj = mode == WifiMode.inject && !needsReboot;
+    // True while a live switch runs (but not the armed-reboot state): the block
+    // reads as stepped loading progress instead of a static status line.
+    final switching = busy && !needsReboot;
     // When the Stock segment is armed for reboot the top block reads as a
     // reboot prompt, but the layout (icon + text + segmented switch) is
     // identical to every other state, so nothing jumps size.
-    final (icon, title, subtitle) = needsReboot
+    final (icon, baseTitle, subtitle) = needsReboot
         ? (
             Icons.restart_alt,
             'Reboot needed',
@@ -265,6 +317,9 @@ class _WifiHeroCard extends StatelessWidget {
                 'No stack loaded.',
               ),
           };
+    final title = switching
+        ? (mode == WifiMode.stock ? 'Switching to Stock…' : 'Switching to Inject…')
+        : baseTitle;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -305,7 +360,7 @@ class _WifiHeroCard extends StatelessWidget {
                   children: [...previousChildren, ?currentChild],
                 ),
                 child: Column(
-                  key: ValueKey((mode, needsReboot)),
+                  key: ValueKey((mode, needsReboot, switching)),
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
@@ -331,14 +386,17 @@ class _WifiHeroCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
+                    if (switching)
+                      _SwitchSteps(toInject: mode == WifiMode.inject)
+                    else
+                      Text(
+                        subtitle,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
                   ],
                 ),
               ),
@@ -349,6 +407,7 @@ class _WifiHeroCard extends StatelessWidget {
         _WifiSegmented(
           mode: mode,
           needsReboot: needsReboot,
+          busy: busy,
           onSelect: onSelect,
           onReboot: onReboot,
         ),
@@ -388,12 +447,17 @@ class _WifiSegmented extends StatelessWidget {
   const _WifiSegmented({
     required this.mode,
     required this.needsReboot,
+    required this.busy,
     required this.onSelect,
     required this.onReboot,
   });
 
   final WifiMode mode;
   final bool needsReboot;
+
+  /// A switch is mid-flight — the whole toggle greys out and stops taking taps
+  /// until it settles, so you can't fire a second switch over the first.
+  final bool busy;
   final ValueChanged<WifiMode> onSelect;
   final VoidCallback onReboot;
 
@@ -408,7 +472,7 @@ class _WifiSegmented extends StatelessWidget {
     // of the still-live inject mode underneath.
     final index = (!needsReboot && mode == WifiMode.inject) ? 1 : 0;
 
-    return LayoutBuilder(
+    final track = LayoutBuilder(
       builder: (context, constraints) {
         final cellW = (constraints.maxWidth - _pad * 2) / 2;
         return Container(
@@ -478,6 +542,16 @@ class _WifiSegmented extends StatelessWidget {
         );
       },
     );
+    // Grey out and swallow taps while a switch is in flight, so the toggle
+    // can't fire a second switch over the first.
+    return IgnorePointer(
+      ignoring: busy,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        opacity: busy ? 0.45 : 1.0,
+        child: track,
+      ),
+    );
   }
 }
 
@@ -525,6 +599,91 @@ class _WifiSeg extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The live "what's happening now" line under the hero title while a switch
+/// runs: it steps through the phases the root script goes through (unload,
+/// load cfg80211/mac80211, restart services, bring Wi-Fi up) so the wait reads
+/// as real progress. The switch itself is one root round-trip — these labels
+/// are paced by a timer to roughly track it, not driven by live stdout, and it
+/// holds on the last step until the card leaves the switching state.
+class _SwitchSteps extends StatefulWidget {
+  const _SwitchSteps({required this.toInject});
+
+  final bool toInject;
+
+  @override
+  State<_SwitchSteps> createState() => _SwitchStepsState();
+}
+
+class _SwitchStepsState extends State<_SwitchSteps> {
+  Timer? _timer;
+  int _i = 0;
+
+  static const _injectSteps = <String>[
+    'Disabling Wi-Fi…',
+    'Unloading vendor stack…',
+    'Loading cfg80211…',
+    'Loading mac80211…',
+    'Bringing injection up…',
+  ];
+
+  static const _stockSteps = <String>[
+    'Disabling Wi-Fi…',
+    'Unloading injection stack…',
+    'Loading vendor cfg80211 / mac80211…',
+    'Loading qca_cld3…',
+    'Restarting Wi-Fi services…',
+    'Bringing stock Wi-Fi up…',
+  ];
+
+  List<String> get _steps => widget.toInject ? _injectSteps : _stockSteps;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 1400), (t) {
+      if (_i < _steps.length - 1) {
+        setState(() => _i++);
+      } else {
+        t.cancel(); // hold the last step until the switch finishes
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 280),
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.35),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
+        ),
+      ),
+      child: Text(
+        _steps[_i],
+        key: ValueKey(_i),
+        style: Theme.of(context)
+            .textTheme
+            .bodySmall
+            ?.copyWith(color: scheme.onSurfaceVariant),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

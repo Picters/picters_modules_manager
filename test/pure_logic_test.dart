@@ -159,6 +159,24 @@ void main() {
     });
   });
 
+  group('isSafeAssetName', () {
+    test('accepts the real date-stamped release asset names', () {
+      expect(isSafeAssetName('Picters-OOT-Modules-20260719-2228.zip'), isTrue);
+      expect(isSafeAssetName('Picters-Kernel-peach-20260719-2228.zip'), isTrue);
+      expect(isSafeAssetName('app-release.apk'), isTrue);
+      expect(isSafeAssetName('build_1.1.5+5.zip'), isTrue);
+    });
+
+    test('rejects shell-injection and path-traversal attempts', () {
+      expect(isSafeAssetName("k';reboot;'.zip"), isFalse); // quote break-out
+      expect(isSafeAssetName(r'k$(reboot).zip'), isFalse); // command sub
+      expect(isSafeAssetName('k`reboot`.zip'), isFalse); // backtick sub
+      expect(isSafeAssetName('../../evil.zip'), isFalse); // slash / traversal
+      expect(isSafeAssetName('a b.zip'), isFalse); // whitespace
+      expect(isSafeAssetName(''), isFalse); // empty
+    });
+  });
+
   group('hasApkMagic', () {
     test('accepts the ZIP/APK local-file-header magic', () {
       expect(hasApkMagic([0x50, 0x4B, 0x03, 0x04, 0x00]), isTrue);

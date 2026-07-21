@@ -46,3 +46,8 @@ app.*.map.json
 
 # Built APKs are published as GitHub release assets, not committed as source.
 *.apk
+
+# Release signing — keystore and credentials stay out of source control.
+/android/key.properties
+/android/app/*.jks
+/android/app/*.keystore

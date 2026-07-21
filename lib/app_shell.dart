@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,9 +9,11 @@ import 'module_repository.dart';
 import 'modules_screen.dart';
 import 'native_bridge.dart';
 import 'overview_screen.dart';
+import 'performance_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
 import 'update_checker.dart';
+import 'update_controller.dart';
 import 'widgets.dart';
 
 class AppShell extends StatefulWidget {
@@ -38,6 +42,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final AppController _controller = AppController(ModuleRepository());
   final PageController _pageController = PageController();
 
+  // Pushed USB attach/detach events — refresh the scan the moment an adapter is
+  // plugged instead of waiting out the poll interval.
+  StreamSubscription<void>? _usbSub;
+
   // Only the fields the shell chrome needs, so the 1s poll doesn't rebuild
   // the whole Scaffold — the two screens have their own AnimatedBuilders.
   RootStatus _rootStatus = RootStatus.checking;
@@ -49,20 +57,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   // two heavy screens. (Doing that mid-swipe was the freeze-then-jump.)
   final ValueNotifier<int> _tab = ValueNotifier(0);
 
-  static const _titles = ['Overview', 'Modules', 'Settings'];
+  static const _titles = ['Overview', 'Modules', 'Performance', 'Settings'];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _controller.addListener(_handleControllerChanged);
+    // The update pill lives on its own notifier now, so watch it too.
+    _controller.update.addListener(_handleControllerChanged);
     _controller.init();
+    _usbSub = NativeBridge.usbEvents().listen((_) {
+      if (_controller.rootStatus == RootStatus.granted) _controller.refresh();
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _usbSub?.cancel();
     _controller.removeListener(_handleControllerChanged);
+    _controller.update.removeListener(_handleControllerChanged);
     _pageController.dispose();
     _tab.dispose();
     _controller.dispose();
@@ -70,7 +85,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _handleControllerChanged() {
-    final hasUpdate = _controller.anyUpdateAvailable;
+    final hasUpdate = _controller.update.anyUpdateAvailable;
     final onPicters = _controller.onPictersKernel;
     if (_controller.rootStatus != _rootStatus ||
         hasUpdate != _hasUpdate ||
@@ -156,7 +171,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             : const Text('Modules Manager'),
         actions: [
           if (_hasUpdate)
-            _UpdatePill(onTap: () => _showUpdateDialog(context, _controller)),
+            _UpdatePill(onTap: () => _showUpdateDialog(context, _controller.update)),
           if (granted)
             IconButton(
               icon: const Icon(Icons.add_to_home_screen_outlined),
@@ -211,7 +226,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               ),
               _KeepAlive(
                 child: RepaintBoundary(
-                  child: SettingsScreen(controller: _controller),
+                  child: PerformanceScreen(controller: _controller.perf),
+                ),
+              ),
+              _KeepAlive(
+                child: RepaintBoundary(
+                  child: SettingsScreen(controller: _controller.settings),
                 ),
               ),
             ],
@@ -238,6 +258,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       icon: Icons.tune_outlined,
                       selectedIcon: Icons.tune,
                       label: 'Modules',
+                    ),
+                    BottomBarItem(
+                      icon: Icons.speed_outlined,
+                      selectedIcon: Icons.speed,
+                      label: 'Performance',
                     ),
                     BottomBarItem(
                       icon: Icons.settings_outlined,
@@ -357,7 +382,7 @@ String? _updateNotes(UpdateInfo? app, KernelUpdateInfo? kern) {
 /// One combined update sheet for everything — the app APK and/or the kernel +
 /// OOT-modules build. A single Install downloads each (a bar per artifact),
 /// installs them (x/y), then prompts a reboot to activate the modules.
-void _showUpdateDialog(BuildContext context, AppController controller) {
+void _showUpdateDialog(BuildContext context, UpdateController controller) {
   if (!controller.anyUpdateAvailable) return;
 
   showDialog<void>(
