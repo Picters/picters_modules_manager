@@ -61,7 +61,7 @@ void main() {
   });
 
   group('parsePerfScan', () {
-    String scan({required String conf}) => '''
+    String scan({required String conf, bool bootOk = false}) => '''
 __PERF_CPU__
 P:policy0|0 1 2 3 4 5|3628800|3628800|walt
 F:policy0|384000 2112000 3628800
@@ -71,7 +71,9 @@ __PERF_GPU__
 GAVAIL:160000000 539000000 902000000 1200000000
 GMAX:902000000
 __PERF_CONF__
-$conf''';
+$conf
+__PERF_CAP__
+${bootOk ? 'PERF_BOOT_OK' : ''}''';
 
     test('parses clusters, GPU and the persisted profile from config', () {
       final s = parsePerfScan(scan(conf: '''
@@ -107,6 +109,13 @@ gpu 539000000'''));
       final perf = s.clusters.firstWhere((c) => c.policy == 'policy0');
       expect(clusterLabel(prime, s.clusters), 'Prime cores');
       expect(clusterLabel(perf, s.clusters), 'Performance cores');
+    });
+
+    test('module perf boot-support is read from the capability marker', () {
+      expect(parsePerfScan(scan(conf: '', bootOk: true)).bootApplySupported,
+          isTrue);
+      expect(parsePerfScan(scan(conf: '', bootOk: false)).bootApplySupported,
+          isFalse);
     });
   });
 }

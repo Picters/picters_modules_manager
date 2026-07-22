@@ -196,17 +196,7 @@ class UpdateController extends ChangeNotifier {
         task.downloadProgress = 1;
         notifyListeners();
       }
-      if (app != null) {
-        final task = updateTasks.firstWhere((t) => !t.isKernel);
-        apkFile = await _updates.download(app.apkUrl, onProgress: (r, t) {
-          task.downloadProgress = t > 0 ? r / t : null;
-          notifyListeners();
-        });
-        task.downloadProgress = 1;
-        notifyListeners();
-      }
-
-      // ── Install phase ──
+      // ── Install kernel/modules (they can't restart us). ──
       updatePhase = UpdatePhase.installing;
       notifyListeners();
 
@@ -237,10 +227,23 @@ class UpdateController extends ChangeNotifier {
         await _persistRebootPending();
         notifyListeners();
       }
-      if (app != null && apkFile != null) {
+      // ── App LAST: download, then install. `pm install -r -d` swaps the
+      // running app out, so it must be the final step. An app-only update never
+      // sets rebootPending, so it doesn't ask for a reboot.
+      if (app != null) {
+        updatePhase = UpdatePhase.downloading;
+        notifyListeners();
+        final task = updateTasks.firstWhere((t) => !t.isKernel);
+        apkFile = await _updates.download(app.apkUrl, onProgress: (r, t) {
+          task.downloadProgress = t > 0 ? r / t : null;
+          notifyListeners();
+        });
+        task.downloadProgress = 1;
+        updatePhase = UpdatePhase.installing;
+        notifyListeners();
         final err = await _installApk(apkFile);
         if (err != null) throw Exception(err);
-        updateTasks.firstWhere((t) => !t.isKernel).installed = true;
+        task.installed = true;
         availableUpdate = null;
         notifyListeners();
       }

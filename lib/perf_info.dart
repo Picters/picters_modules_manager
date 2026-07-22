@@ -128,6 +128,7 @@ class PerfState {
     required this.gpu,
     required this.profile,
     required this.persistOnBoot,
+    required this.bootApplySupported,
   });
 
   final List<CpuCluster> clusters;
@@ -140,6 +141,11 @@ class PerfState {
   /// Whether the module re-applies these caps at boot.
   final bool persistOnBoot;
 
+  /// Whether the installed module's boot service carries the perf re-apply loop.
+  /// The vendor perf HAL rewrites scaling_max_freq, so without that loop a cap
+  /// can't be enforced — the UI blocks the controls and asks for a module update.
+  final bool bootApplySupported;
+
   bool get isEmpty => clusters.isEmpty;
 
   static const empty = PerfState(
@@ -147,6 +153,7 @@ class PerfState {
     gpu: null,
     profile: null,
     persistOnBoot: false,
+    bootApplySupported: false,
   );
 }
 
