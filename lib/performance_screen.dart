@@ -45,11 +45,14 @@ class PerformanceScreen extends StatelessWidget {
           onRefresh: controller.refresh,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
           children: [
-            _ProfileHero(
-              profile: controller.profile,
-              busy: controller.busy,
-              onSelect: (p) => _select(context, p),
-            ),
+            if (state.bootApplySupported)
+              _ProfileHero(
+                profile: controller.profile,
+                busy: controller.busy,
+                onSelect: (p) => _select(context, p),
+              )
+            else
+              const _UpdateModuleNote(),
             const SizedBox(height: 26),
             const SectionHeader(icon: Icons.memory, label: 'CPU'),
             const SizedBox(height: 12),
@@ -75,14 +78,16 @@ class PerformanceScreen extends StatelessWidget {
               Card.outlined(
                   child: _GpuRow(gpu: state.gpu!, profile: controller.profile)),
             ],
-            const SizedBox(height: 26),
-            const SectionHeader(icon: Icons.save_outlined, label: 'Persistence'),
-            const SizedBox(height: 12),
-            _PersistCard(
-              enabled: controller.persistOnBoot,
-              busy: controller.busy,
-              onChanged: (v) => _setPersist(context, v),
-            ),
+            if (state.bootApplySupported) ...[
+              const SizedBox(height: 26),
+              const SectionHeader(icon: Icons.save_outlined, label: 'Persistence'),
+              const SizedBox(height: 12),
+              _PersistCard(
+                enabled: controller.persistOnBoot,
+                busy: controller.busy,
+                onChanged: (v) => _setPersist(context, v),
+              ),
+            ],
           ],
         );
       },
@@ -342,12 +347,65 @@ class _PersistCard extends StatelessWidget {
               )
             : Icon(Icons.save_outlined, color: scheme.onSurfaceVariant),
         title: const Text('Keep after reboot'),
-        subtitle: const Text(
-          'The module re-applies the profile at boot. Remove the module to '
-          'revert to stock.',
-        ),
+        subtitle: const Text('The module re-applies the profile at boot.'),
         value: enabled,
         onChanged: busy ? null : onChanged,
+      ),
+    );
+  }
+}
+
+/// Shown instead of the profile selector when the installed module lacks the
+/// perf re-apply loop: without it a cap can't be held (the vendor perf HAL
+/// overrides it), so the controls are blocked until the kernel & module are
+/// updated.
+class _UpdateModuleNote extends StatelessWidget {
+  const _UpdateModuleNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Card.outlined(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: Icon(Icons.system_update_alt,
+                  color: scheme.primary, size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Update the module',
+                    style: textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Performance profiles need the latest kernel & module to '
+                    'hold. Flash the newest build to enable them.',
+                    style: textTheme.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

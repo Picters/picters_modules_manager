@@ -8,6 +8,12 @@ const String kPerfConfig = '$kPerfConfigDir/perf.conf';
 const String kGpuMaxNode = '/sys/class/kgsl/kgsl-3d0/max_gpuclk';
 const String _cpuBase = '/sys/devices/system/cpu/cpufreq';
 
+/// The module's boot service — probed for the perf re-apply loop (it reads
+/// perf.conf). An older module without it can't hold a cap, so the UI blocks
+/// the performance controls until the module is updated.
+const String kModuleService =
+    '/data/adb/modules/picters-modules-pack/service.sh';
+
 List<int> _parseFreqList(String s) => s
     .trim()
     .split(RegExp(r'\s+'))
@@ -40,7 +46,9 @@ class PerfRepository {
       'echo "GAVAIL:\$(cat /sys/class/kgsl/kgsl-3d0/gpu_available_frequencies 2>/dev/null)"; '
       'echo "GMAX:\$(cat $kGpuMaxNode 2>/dev/null)"; '
       'echo __PERF_CONF__; '
-      'cat $kPerfConfig 2>/dev/null',
+      'cat $kPerfConfig 2>/dev/null; '
+      'echo __PERF_CAP__; '
+      "grep -qF 'perf.conf' '$kModuleService' 2>/dev/null && echo PERF_BOOT_OK",
     );
     return parsePerfScan(r.stdout);
   }
@@ -99,6 +107,7 @@ PerfState parsePerfScan(String out) {
   var gpuMax = 0;
   final conf = <String, String>{};
   final confCpu = <String, int>{}; // policyPath -> freq (unused for state, kept simple)
+  var bootOk = false;
 
   for (final raw in lines) {
     final line = raw.trim();
@@ -112,6 +121,10 @@ PerfState parsePerfScan(String out) {
     }
     if (line == '__PERF_CONF__') {
       section = 3;
+      continue;
+    }
+    if (line == '__PERF_CAP__') {
+      section = 4;
       continue;
     }
     switch (section) {
@@ -145,6 +158,9 @@ PerfState parsePerfScan(String out) {
             conf[key] = val;
           }
         }
+        break;
+      case 4:
+        if (line == 'PERF_BOOT_OK') bootOk = true;
         break;
     }
   }
@@ -185,5 +201,6 @@ PerfState parsePerfScan(String out) {
     gpu: gpu,
     profile: PerfProfileX.fromName(conf['profile']),
     persistOnBoot: conf['enabled'] == '1',
+    bootApplySupported: bootOk,
   );
 }
