@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'widgets.dart';
+
 /// One destination in [AppBottomBar].
 class BottomBarItem {
   const BottomBarItem({
@@ -72,16 +74,22 @@ class AppBottomBar extends StatelessWidget {
                   // The one moving element — retargets on every rebuild, so a
                   // second tap mid-slide redirects it instead of queueing.
                   AnimatedPositioned(
-                    duration: const Duration(milliseconds: 240),
+                    // easeOutCubic stops AT the target (never past the end cell,
+                    // so it can't cross the wall); the JellyStretch squish is
+                    // what makes it "slam into" the wall instead.
+                    duration: const Duration(milliseconds: 300),
                     curve: Curves.easeOutCubic,
                     top: 0,
                     bottom: 0,
                     left: _cell * index,
                     width: _cell,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: scheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(_tabRadius),
+                    child: JellyStretch(
+                      trigger: index,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: scheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(_tabRadius),
+                        ),
                       ),
                     ),
                   ),
@@ -136,8 +144,7 @@ class _IconCell extends StatelessWidget {
     // the sliding tablet and the haptic tick are the feedback.
     return SizedBox(
       width: width,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      child: JellyTap(
         onTap: onTap,
         child: Semantics(
           label: item.label,

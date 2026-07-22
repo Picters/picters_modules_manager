@@ -40,7 +40,7 @@ class _SnappyPagePhysics extends PageScrollPhysics {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final AppController _controller = AppController(ModuleRepository());
-  final PageController _pageController = PageController();
+  PageController _pageController = PageController();
 
   // Pushed USB attach/detach events — refresh the scan the moment an adapter is
   // plugged instead of waiting out the poll interval.
@@ -51,13 +51,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   RootStatus _rootStatus = RootStatus.checking;
   bool _hasUpdate = false;
   bool _onPictersKernel = true;
+  bool _deviceSupported = true;
 
   // The active tab as a notifier, NOT setState: only the AppBar title and the
   // nav bar listen to it, so switching tabs never rebuilds the PageView or the
   // two heavy screens. (Doing that mid-swipe was the freeze-then-jump.)
   final ValueNotifier<int> _tab = ValueNotifier(0);
 
-  static const _titles = ['Overview', 'Modules', 'Performance', 'Settings'];
+  // The Performance tab can be hidden from Settings; the titles, pages and nav
+  // items are built from this.
+  bool _hidePerf = false;
+
+  // False until the persisted hide-flag has been read once — the tab chrome is
+  // held back until then so it never flashes 4 tabs and collapses to 3.
+  bool _settingsReady = false;
 
   @override
   void initState() {
@@ -66,6 +73,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _controller.addListener(_handleControllerChanged);
     // The update pill lives on its own notifier now, so watch it too.
     _controller.update.addListener(_handleControllerChanged);
+    _controller.settings.addListener(_handleSettingsChanged);
     _controller.init();
     _usbSub = NativeBridge.usbEvents().listen((_) {
       if (_controller.rootStatus == RootStatus.granted) _controller.refresh();
@@ -78,6 +86,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _usbSub?.cancel();
     _controller.removeListener(_handleControllerChanged);
     _controller.update.removeListener(_handleControllerChanged);
+    _controller.settings.removeListener(_handleSettingsChanged);
     _pageController.dispose();
     _tab.dispose();
     _controller.dispose();
@@ -87,15 +96,62 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _handleControllerChanged() {
     final hasUpdate = _controller.update.anyUpdateAvailable;
     final onPicters = _controller.onPictersKernel;
+    final deviceSupported = _controller.update.deviceSupported;
     if (_controller.rootStatus != _rootStatus ||
         hasUpdate != _hasUpdate ||
-        onPicters != _onPictersKernel) {
+        onPicters != _onPictersKernel ||
+        deviceSupported != _deviceSupported) {
       setState(() {
         _rootStatus = _controller.rootStatus;
         _hasUpdate = hasUpdate;
         _onPictersKernel = onPicters;
+        _deviceSupported = deviceSupported;
       });
     }
+  }
+
+  // Reacts to the Settings controller: the first flag read reveals the chrome
+  // (and adopts the tab set silently, leaving the user on Overview); a later
+  // user toggle re-indexes and keeps the user on Settings.
+  void _handleSettingsChanged() {
+    final s = _controller.settings;
+    final ready = s.loaded;
+    final hide = s.hidePerformance;
+
+    // A genuine user toggle only happens after the first load, when the flag
+    // actually flips. Everything else (initial read, becoming ready) just adopts
+    // the value without moving the user.
+    final userToggle = ready && _settingsReady && hide != _hidePerf;
+    if (hide == _hidePerf && ready == _settingsReady) return;
+
+    if (!userToggle) {
+      setState(() {
+        _hidePerf = hide;
+        _settingsReady = ready;
+      });
+      return;
+    }
+
+    // The Performance toggle lives on Settings (the last tab). Hiding/showing it
+    // shifts indices, so rebuild with a fresh controller aimed at the Settings
+    // tab's new index — the user stays put.
+    final settingsIndex = hide ? 2 : 3;
+    _pageController.dispose();
+    _pageController = PageController(initialPage: settingsIndex);
+    setState(() {
+      _hidePerf = hide;
+      _tab.value = settingsIndex;
+    });
+    // When the tab set GROWS (un-hiding), initialPage can clamp against the
+    // stale, smaller scroll extent and land on the wrong page (Performance) —
+    // re-assert the target once the new layout is in.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          _pageController.hasClients &&
+          _pageController.page?.round() != settingsIndex) {
+        _pageController.jumpToPage(settingsIndex);
+      }
+    });
   }
 
   @override
@@ -158,7 +214,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final granted = _rootStatus == RootStatus.granted;
+    // Granted but flags not read yet → keep the neutral loader up rather than
+    // painting a tab set we're about to change.
+    final granted = _rootStatus == RootStatus.granted && _settingsReady;
+    final hidePerf = _hidePerf;
+    final titles = [
+      'Overview',
+      'Modules',
+      if (!hidePerf) 'Performance',
+      'Settings',
+    ];
     return Scaffold(
       // The floating bar hovers over the content instead of reserving a strip.
       extendBody: true,
@@ -166,7 +231,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         title: granted
             ? ValueListenableBuilder<int>(
                 valueListenable: _tab,
-                builder: (context, tab, _) => Text(_titles[tab]),
+                builder: (context, tab, _) =>
+                    Text(titles[tab.clamp(0, titles.length - 1)]),
               )
             : const Text('Modules Manager'),
         actions: [
@@ -188,10 +254,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           spinner: true,
         ),
         RootStatus.denied => _RootDenied(controller: _controller),
+        // Root is in, but hold the neutral loader until the tab flags are read
+        // so the chrome appears once, already in its final shape.
+        RootStatus.granted when !_settingsReady => const _CenterGlyph(
+          icon: Icons.hourglass_empty,
+          title: 'Loading…',
+          spinner: true,
+        ),
         // Pause the poll while a page scroll is in flight (swipe or tap-driven
         // animate) — a mid-transition rebuild is what stalled the animation.
         RootStatus.granted => Column(
           children: [
+            // Standing notice on hardware this build isn't for — updates are
+            // disabled there (an sm8850 kernel would brick a different device).
+            if (!_deviceSupported) const _UnsupportedDeviceBanner(),
             // Standing warning strip on a foreign (non-Picters) kernel.
             if (!_onPictersKernel) const _KernelWarningBanner(),
             Expanded(
@@ -215,21 +291,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             // of rebuilding the screen collapsed from scratch.
             children: [
               _KeepAlive(
+                key: const ValueKey('page-overview'),
                 child: RepaintBoundary(
                   child: OverviewScreen(controller: _controller),
                 ),
               ),
               _KeepAlive(
+                key: const ValueKey('page-modules'),
                 child: RepaintBoundary(
                   child: ModulesScreen(controller: _controller),
                 ),
               ),
-              _KeepAlive(
-                child: RepaintBoundary(
-                  child: PerformanceScreen(controller: _controller.perf),
+              if (!hidePerf)
+                _KeepAlive(
+                  key: const ValueKey('page-performance'),
+                  child: RepaintBoundary(
+                    child: PerformanceScreen(controller: _controller.perf),
+                  ),
                 ),
-              ),
               _KeepAlive(
+                key: const ValueKey('page-settings'),
                 child: RepaintBoundary(
                   child: SettingsScreen(controller: _controller.settings),
                 ),
@@ -248,23 +329,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 builder: (context, tab, _) => AppBottomBar(
                   index: tab,
                   onSelect: _goToTab,
-                  items: const [
-                    BottomBarItem(
+                  items: [
+                    const BottomBarItem(
                       icon: Icons.home_outlined,
                       selectedIcon: Icons.home,
                       label: 'Overview',
                     ),
-                    BottomBarItem(
+                    const BottomBarItem(
                       icon: Icons.tune_outlined,
                       selectedIcon: Icons.tune,
                       label: 'Modules',
                     ),
-                    BottomBarItem(
-                      icon: Icons.speed_outlined,
-                      selectedIcon: Icons.speed,
-                      label: 'Performance',
-                    ),
-                    BottomBarItem(
+                    if (!hidePerf)
+                      const BottomBarItem(
+                        icon: Icons.speed_outlined,
+                        selectedIcon: Icons.speed,
+                        label: 'Performance',
+                      ),
+                    const BottomBarItem(
                       icon: Icons.settings_outlined,
                       selectedIcon: Icons.settings,
                       label: 'Settings',
@@ -281,7 +363,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 /// Wraps a PageView child so it isn't disposed when it scrolls off-screen —
 /// the two tabs then keep their state across switches.
 class _KeepAlive extends StatefulWidget {
-  const _KeepAlive({required this.child});
+  const _KeepAlive({super.key, required this.child});
 
   final Widget child;
 
@@ -752,6 +834,44 @@ class _KernelWarningBanner extends StatelessWidget {
                 child: Text(
                   'Not running the Picters kernel — Wi-Fi injection and the '
                   'bundled modules may not work.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onErrorContainer,
+                        fontWeight: FontWeight.w500,
+                      ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Standing notice shown under the app bar when the device isn't a Xiaomi 17
+/// series phone (sm8850). Updates are hard-disabled there — the kernel and OOT
+/// modules are built for that SoC and would brick or fail on anything else.
+class _UnsupportedDeviceBanner extends StatelessWidget {
+  const _UnsupportedDeviceBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      child: SafeArea(
+        top: false,
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(Icons.block, size: 20, color: scheme.onErrorContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Unsupported device — updates are disabled. This build is only '
+                  'for the Xiaomi 17 series (sm8850).',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: scheme.onErrorContainer,
                         fontWeight: FontWeight.w500,

@@ -220,9 +220,13 @@ const String usbScanFragment =
     'fi; done';
 
 /// Shell fragment that lists every live wireless netdev (a `phy80211` dir under
-/// it) as `name|driver|operstate|type`, one per line, each prefixed with
-/// [ifaceMarker]. `type` is the ARPHRD number (1 = ether/managed, 803 =
-/// radiotap/monitor). Folded into the same combined scan as [usbScanFragment].
+/// it) as `name|driver|flags|type`, one per line, each prefixed with
+/// [ifaceMarker]. `flags` is the hex IFF_* bitmask (`/sys/class/net/*/flags`);
+/// bit 0 (IFF_UP) is the *admin* up/down the toggle drives — read here instead
+/// of `operstate`, which reads "unknown"/"down" for a monitor VIF or an
+/// unassociated managed iface even while it's admin-up. `type` is the ARPHRD
+/// number (1 = ether/managed, 803 = radiotap/monitor). Folded into the same
+/// combined scan as [usbScanFragment].
 const String ifaceMarker = '___PMM_IFACE___';
 
 const String ifaceScanFragment =
@@ -231,7 +235,7 @@ const String ifaceScanFragment =
     'ifn=\$(basename "\$n"); '
     'drv=""; '
     'if [ -L "\${n}device/driver" ]; then drv=\$(basename "\$(readlink "\${n}device/driver")"); fi; '
-    'echo "$ifaceMarker\${ifn}|\${drv}|\$(cat "\${n}operstate" 2>/dev/null)|\$(cat "\${n}type" 2>/dev/null)"; '
+    'echo "$ifaceMarker\${ifn}|\${drv}|\$(cat "\${n}flags" 2>/dev/null)|\$(cat "\${n}type" 2>/dev/null)"; '
     'done';
 
 /// Parses the lines produced by [usbScanFragment] (already split on '\n') into

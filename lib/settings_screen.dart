@@ -18,6 +18,11 @@ class SettingsScreen extends StatelessWidget {
     await controller.setBootLoadEnabled(value);
   }
 
+  Future<void> _setHidePerf(bool value) async {
+    HapticFeedback.selectionClick();
+    await controller.setHidePerformance(value);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -31,10 +36,24 @@ class SettingsScreen extends StatelessWidget {
           ),
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
           children: [
-            _BootLoadCard(
-              enabled: controller.bootLoadEnabled,
-              busy: controller.bootLoadBusy,
-              onChanged: _setBootLoad,
+            const SectionHeader(icon: Icons.tune, label: 'General'),
+            const SizedBox(height: 12),
+            // Both app toggles grouped into one block.
+            Card.outlined(
+              child: Column(
+                children: [
+                  _BootLoadCard(
+                    enabled: controller.bootLoadEnabled,
+                    busy: controller.bootLoadBusy,
+                    onChanged: _setBootLoad,
+                  ),
+                  const CardDivider(),
+                  _HidePerfCard(
+                    enabled: controller.hidePerformance,
+                    onChanged: _setHidePerf,
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 26),
             const SectionHeader(icon: Icons.bug_report, label: 'Debug'),
@@ -64,23 +83,42 @@ class _BootLoadCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card.outlined(
-      child: SwitchListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        secondary: busy
-            ? SizedBox(
-                width: 24,
-                height: 24,
-                child: MorphingPolygon(size: 24, color: scheme.primary),
-              )
-            : Icon(Icons.flash_on, color: scheme.onSurfaceVariant),
-        title: const Text('Load modules on boot'),
-        subtitle: const Text(
-          'Auto-loads every module except Wi-Fi when the device starts.',
-        ),
-        value: enabled,
-        onChanged: busy ? null : onChanged,
+    return SwitchListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      secondary: busy
+          ? SizedBox(
+              width: 24,
+              height: 24,
+              child: MorphingPolygon(size: 24, color: scheme.primary),
+            )
+          : Icon(Icons.flash_on, color: scheme.onSurfaceVariant),
+      title: const Text('Load modules on boot'),
+      subtitle: const Text(
+        'Auto-loads every module except Wi-Fi when the device starts.',
       ),
+      value: enabled,
+      onChanged: busy ? null : onChanged,
+    );
+  }
+}
+
+/// Hides the Performance tab from the bottom bar.
+class _HidePerfCard extends StatelessWidget {
+  const _HidePerfCard({required this.enabled, required this.onChanged});
+
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SwitchListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      secondary: Icon(Icons.speed_outlined, color: scheme.onSurfaceVariant),
+      title: const Text('Hide Performance screen'),
+      subtitle: const Text('Removes the Performance tab from the bottom bar.'),
+      value: enabled,
+      onChanged: onChanged,
     );
   }
 }

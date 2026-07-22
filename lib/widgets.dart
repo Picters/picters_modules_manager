@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart' show CupertinoSliverRefreshControl, RefreshIndicatorMode;
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 
 import 'module_info.dart';
@@ -272,6 +273,39 @@ Future<WifiInterface?> showInterfacePicker(
   );
 }
 
+/// Pops [builder] open from [origin] (the tap's global position) as a card
+/// centred on screen — it grows smoothly from that point and fades in (no
+/// bounce/overshoot), reading as the row unfolding into the panel. Dismiss by
+/// tapping the scrim or popping the route.
+Future<T?> showJellyPanel<T>(
+  BuildContext context, {
+  required Offset origin,
+  required WidgetBuilder builder,
+}) {
+  final size = MediaQuery.sizeOf(context);
+  final align = Alignment(
+    (origin.dx / size.width * 2 - 1).clamp(-1.0, 1.0),
+    (origin.dy / size.height * 2 - 1).clamp(-1.0, 1.0),
+  );
+  return showGeneralDialog<T>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: 'Dismiss',
+    barrierColor: Colors.black54,
+    transitionDuration: const Duration(milliseconds: 300),
+    pageBuilder: (context, _, _) => Center(child: Builder(builder: builder)),
+    transitionBuilder: (context, animation, secondary, child) {
+      // Plain ease-out grow — no spring overshoot on open.
+      final grow = 0.9 + 0.1 * Curves.easeOutCubic.transform(animation.value);
+      final fade = Curves.easeOut.transform(animation.value.clamp(0.0, 1.0));
+      return Opacity(
+        opacity: fade,
+        child: Transform.scale(scale: grow, alignment: align, child: child),
+      );
+    },
+  );
+}
+
 /// A soft pulsing dot — the "live / active" cue on the Inject hero card.
 class PulsingDot extends StatefulWidget {
   const PulsingDot({super.key, required this.color, this.size = 8});
@@ -313,6 +347,181 @@ class _PulsingDotState extends State<PulsingDot> with SingleTickerProviderStateM
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Wraps a tappable child in a "jelly" reaction: the instant you touch it, it
+/// dips and tilts in 3D *toward the exact point you pressed* (poke the corner →
+/// that corner sinks) and squashes; on release it springs back past its resting
+/// size with a wobble. Replaces the ink ripple. The tilt lands immediately on
+/// press (not after a hold), so even a quick tap reads as jelly.
+class JellyTap extends StatefulWidget {
+  const JellyTap({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.pressScale = 0.92,
+    this.tilt = 0.20,
+  });
+
+  final Widget child;
+  final VoidCallback? onTap;
+
+  /// How far it compresses while held.
+  final double pressScale;
+
+  /// Max perspective tilt (radians) toward the press point.
+  final double tilt;
+
+  @override
+  State<JellyTap> createState() => _JellyTapState();
+}
+
+class _JellyTapState extends State<JellyTap>
+    with SingleTickerProviderStateMixin {
+  // 0 = rest, 1 = fully pressed. Unbounded so the spring release overshoots
+  // below 0 — the wobble past the resting size (the "hit the wall" bounce).
+  late final AnimationController _c =
+      AnimationController.unbounded(vsync: this, value: 0);
+  static const _spring = SpringDescription(mass: 1, stiffness: 300, damping: 11);
+
+  // Where on the child the press landed, in [-1, 1] from centre.
+  Alignment _at = Alignment.center;
+
+  void _press(TapDownDetails d) {
+    final box = context.findRenderObject() as RenderBox?;
+    final s = box?.size;
+    if (s != null && s.width > 0 && s.height > 0) {
+      _at = Alignment(
+        (d.localPosition.dx / s.width * 2 - 1).clamp(-1.0, 1.0),
+        (d.localPosition.dy / s.height * 2 - 1).clamp(-1.0, 1.0),
+      );
+    } else {
+      _at = Alignment.center;
+    }
+    // Snap to pressed almost instantly so the tilt shows on a quick tap too.
+    _c.animateTo(1,
+        duration: const Duration(milliseconds: 45), curve: Curves.easeOut);
+  }
+
+  void _release() =>
+      _c.animateWith(SpringSimulation(_spring, _c.value, 0, _c.velocity));
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: _press,
+      onTapUp: (_) {
+        _release();
+        widget.onTap?.call();
+      },
+      onTapCancel: _release,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, child) {
+          final p = _c.value.clamp(-0.35, 1.0); // <0 = release overshoot
+          final tiltAmt = p.clamp(0.0, 1.0);
+          final base = 1 - (1 - widget.pressScale) * p; // pressed<1, wobble>1
+          final squash = p * 0.5 * (1 - widget.pressScale);
+          final m = Matrix4.identity()
+            ..setEntry(3, 2, 0.0016) // perspective
+            ..rotateX(-_at.y * widget.tilt * tiltAmt)
+            ..rotateY(_at.x * widget.tilt * tiltAmt)
+            ..scaleByDouble(base + squash, base - squash, 1.0, 1.0);
+          return Transform(
+            alignment: Alignment.center,
+            transform: m,
+            child: child,
+          );
+        },
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Gives a sliding tablet a "flings, then slams into the wall and squishes"
+/// jelly reaction whenever [trigger] changes. The squash is anchored to the
+/// LEADING (travel-direction) edge, so the tablet compresses *toward* the wall
+/// it arrives at instead of wobbling symmetrically — reads as hitting it. Pair
+/// with a no-overshoot position curve (easeOutCubic) so it never crosses the
+/// wall, only presses into it.
+class JellyStretch extends StatefulWidget {
+  const JellyStretch({
+    super.key,
+    required this.trigger,
+    required this.child,
+    this.horizontal = true,
+    this.amount = 0.16,
+  });
+
+  /// Change this to fire the wobble (e.g. the selected index / left offset).
+  final Object trigger;
+  final Widget child;
+
+  /// Stretch axis — true = horizontal travel (bottom bar / segmented).
+  final bool horizontal;
+  final double amount;
+
+  @override
+  State<JellyStretch> createState() => _JellyStretchState();
+}
+
+class _JellyStretchState extends State<JellyStretch>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
+
+  // +1 = travelled toward the higher index (right / down), -1 = the other way.
+  // The scale is anchored to that edge so the squish presses into that wall.
+  double _dir = 1;
+
+  @override
+  void didUpdateWidget(JellyStretch old) {
+    super.didUpdateWidget(old);
+    if (old.trigger != widget.trigger) {
+      final a = old.trigger, b = widget.trigger;
+      if (a is num && b is num) _dir = b >= a ? 1 : -1;
+      _c.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final t = _c.value;
+        // Flings out (stretch, trailing edge lags) then, on impact, compresses
+        // toward the wall (squish), springing back — a decaying oscillation.
+        final env = t >= 1
+            ? 0.0
+            : math.sin(t * math.pi * 2) * (1 - t) * (1 - t) * widget.amount;
+        final align = widget.horizontal
+            ? Alignment(_dir, 0)
+            : Alignment(0, _dir);
+        return Transform.scale(
+          scaleX: widget.horizontal ? 1 + env : 1 - env,
+          scaleY: widget.horizontal ? 1 - env : 1 + env,
+          alignment: align,
+          child: child,
+        );
+      },
+      child: widget.child,
     );
   }
 }
@@ -395,9 +604,9 @@ class FadeInSlide extends StatefulWidget {
     required this.child,
     this.delay = Duration.zero,
     this.offset = const Offset(0, 0.08),
-    this.scaleFrom = 0.97,
-    this.curve = Curves.easeOutCubic,
-    this.duration = const Duration(milliseconds: 360),
+    this.scaleFrom = 0.94,
+    this.curve = Curves.easeOutBack,
+    this.duration = const Duration(milliseconds: 520),
   });
 
   final Widget child;
@@ -483,9 +692,9 @@ class _RowRevealState extends State<RowReveal> with SingleTickerProviderStateMix
   late final Animation<double> _fade =
       CurvedAnimation(parent: _c, curve: Curves.easeOut);
   late final Animation<Offset> _slide = Tween(
-    begin: const Offset(0, 0.12),
+    begin: const Offset(0, 0.14),
     end: Offset.zero,
-  ).animate(CurvedAnimation(parent: _c, curve: Curves.easeOutCubic));
+  ).animate(CurvedAnimation(parent: _c, curve: Curves.easeOutBack));
 
   @override
   void initState() {

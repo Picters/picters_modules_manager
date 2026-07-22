@@ -33,30 +33,38 @@ void main() {
       3302400, 3398400, 3513600, 3628800,
     ];
     const stock = 3628800;
+    const perf = PerfDomain.perfCpu;
 
     test('Full returns exactly the stock max', () {
-      expect(cappedMax(PerfProfile.full, stock, p0), stock);
+      expect(cappedMax(PerfProfile.full, perf, stock, p0), stock);
     });
 
-    test('Cool / Balanced snap down to a real OPP step below stock', () {
-      expect(cappedMax(PerfProfile.cool, stock, p0), 2112000); // ~60%
-      expect(cappedMax(PerfProfile.balanced, stock, p0), 2899200); // ~80%
+    test('Eco / Balanced snap down to a real OPP step below stock', () {
+      expect(cappedMax(PerfProfile.eco, perf, stock, p0), 1900800); // ~53%
+      expect(cappedMax(PerfProfile.balanced, perf, stock, p0), 2496000); // ~69%
     });
 
     test('never exceeds the stock max for any profile', () {
       for (final p in PerfProfile.values) {
-        expect(cappedMax(p, stock, p0), lessThanOrEqualTo(stock));
+        expect(cappedMax(p, perf, stock, p0), lessThanOrEqualTo(stock));
       }
     });
 
     test('every capped value is a member of the OPP table (safe to write)', () {
       for (final p in PerfProfile.values) {
-        expect(p0, contains(cappedMax(p, stock, p0)));
+        expect(p0, contains(cappedMax(p, perf, stock, p0)));
       }
     });
 
+    test('prime cores are capped harder than perf cores', () {
+      expect(
+        cappedMax(PerfProfile.eco, PerfDomain.primeCpu, stock, p0),
+        lessThan(cappedMax(PerfProfile.eco, PerfDomain.perfCpu, stock, p0)),
+      );
+    });
+
     test('empty OPP table falls back to stock (never writes a bogus value)', () {
-      expect(cappedMax(PerfProfile.cool, stock, const []), stock);
+      expect(cappedMax(PerfProfile.eco, perf, stock, const []), stock);
     });
   });
 
@@ -78,10 +86,10 @@ ${bootOk ? 'PERF_BOOT_OK' : ''}''';
     test('parses clusters, GPU and the persisted profile from config', () {
       final s = parsePerfScan(scan(conf: '''
 enabled 1
-profile cool
+profile eco
 gpustock 902000000
-cpu /sys/devices/system/cpu/cpufreq/policy0 2112000
-gpu 539000000'''));
+cpu /sys/devices/system/cpu/cpufreq/policy0 1670400
+gpu 422000000'''));
 
       expect(s.clusters, hasLength(2));
       final p0 = s.clusters.firstWhere((c) => c.policy == 'policy0');
@@ -92,7 +100,7 @@ gpu 539000000'''));
       expect(s.gpu, isNotNull);
       expect(s.gpu!.currentMax, 902000000);
       expect(s.gpu!.stockMax, 902000000); // from config
-      expect(s.profile, PerfProfile.cool);
+      expect(s.profile, PerfProfile.eco);
       expect(s.persistOnBoot, isTrue);
     });
 

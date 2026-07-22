@@ -379,7 +379,7 @@ class _ModuleGroupState extends State<_ModuleGroup> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          InkWell(
+          JellyTap(
             onTap: _toggle,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'iw_repository.dart';
 import 'module_dependencies.dart';
 import 'module_info.dart';
 import 'module_repository.dart';
@@ -23,7 +24,8 @@ class AppController extends ChangeNotifier {
       : _repo = repo,
         update = UpdateController(repo),
         settings = SettingsController(repo),
-        perf = PerfController();
+        perf = PerfController(),
+        iw = IwRepository();
 
   final ModuleRepository _repo;
 
@@ -36,6 +38,10 @@ class AppController extends ChangeNotifier {
 
   /// Performance tab state (CPU/GPU frequency caps), likewise isolated.
   final PerfController perf;
+
+  /// Per-interface radio control (monitor/managed, up/down, region, tx power)
+  /// backed by the bundled static `iw` binary — used by the adapter config panel.
+  final IwRepository iw;
 
   RootStatus rootStatus = RootStatus.checking;
   SystemState state = SystemState.empty;
@@ -72,10 +78,15 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     if (ok) {
       unawaited(RootShell.initBinder());
+      // Load the Performance-tab flag in parallel with the first poll so the
+      // shell knows the tab set before it reveals the chrome (no startup jerk).
+      unawaited(settings.init());
+      // Warm the persisted tx-power store so the adapter panel opens straight
+      // at its saved value (no recommended→saved jump).
+      unawaited(iw.preloadTx());
       await _pollOnce(force: true);
       _startTimer();
       unawaited(update.init());
-      unawaited(settings.init());
       unawaited(perf.init());
       unawaited(_checkKernelAuthentic());
     } else {
@@ -195,6 +206,7 @@ class AppController extends ChangeNotifier {
         _lastFingerprint = next.fingerprint;
         state = next;
         notifyListeners();
+        _maybeRestoreTx();
       }
       _pollInterval = nextPollInterval(_pollInterval, changed: changed || force);
     } catch (_) {
@@ -476,13 +488,11 @@ class AppController extends ChangeNotifier {
       }
     }
     if (mod == null) return "Driver $driver isn't staged in this module.";
-    final err = await toggleModule(mod, true);
-    // On a clean load the interface comes up managed already, so just hand it
-    // to the framework (no driver reload needed) so stock Settings can use it.
-    if (err == null) {
-      await reconfigureAdapter(chipsetDriver: driver, reloadDriver: false);
-    }
-    return err;
+    // Loading only stages the driver — handing the adapter to Android's Wi-Fi
+    // framework is a deliberate action now (the adapter panel's Configure
+    // button), never automatic, so a monitor-mode setup isn't yanked back to
+    // managed behind the user's back.
+    return toggleModule(mod, true);
   }
 
   /// True while a Reconfigure round-trip is in flight, so the button can show a
@@ -518,6 +528,42 @@ class AppController extends ChangeNotifier {
               (state.wifiMode == WifiMode.inject && i.name.startsWith('wlan')))
             i,
       ];
+
+  /// Adapter ifaces whose saved tx power we've already restored this plug-in,
+  /// so the recurring poll doesn't re-apply every second. Cleared on unplug.
+  final Set<String> _txRestored = {};
+
+  /// When an adapter appears, re-apply the tx power the user last set for that
+  /// chipset (persisted per driver) — so their choice sticks across re-plugs,
+  /// automatically, no toggle. No saved value → nothing happens.
+  void _maybeRestoreTx() {
+    final live = {for (final i in adapterInterfaces) i.name};
+    _txRestored.removeWhere((n) => !live.contains(n));
+    for (final i in adapterInterfaces) {
+      if (!_txRestored.add(i.name)) continue; // already restored this plug-in
+      final saved = iw.lastSetTxSync(i.driver);
+      if (saved == null || i.driver.isEmpty) continue;
+      unawaited(_restoreTx(i.name, saved));
+    }
+  }
+
+  Future<void> _restoreTx(String iface, int dbm) async {
+    // Tx power only takes with the unrestricted region — set it once, then apply.
+    await iw.setRegulatoryDomain(kUnrestrictedRegDomain);
+    await iw.setTxPower(iface: iface, dbm: dbm);
+  }
+
+  /// Chipset-name text for [iface] (its bound driver plus the matching USB
+  /// adapter's product label, if recognised) — fed to `txProfileFor`.
+  String chipTextFor(WifiInterface iface) {
+    for (final a in state.adapters) {
+      if (a.recognized &&
+          (a.match!.driver == iface.driver || a.device.driver == iface.driver)) {
+        return '${a.match!.label} ${a.device.driver} ${iface.driver}';
+      }
+    }
+    return iface.driver;
+  }
 
   /// Re-hand an adapter to the Android Wi-Fi framework as a managed station.
   /// Pass [iface] to target a specific interface (the picker's choice); with

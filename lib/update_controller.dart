@@ -53,16 +53,28 @@ class UpdateController extends ChangeNotifier {
   String? combinedUpdateError;
   bool rebootPending = false;
 
-  /// Runs every update probe once root is granted: the app + kernel release
-  /// checks, the installed module version, the A/B slot info and whether a
-  /// reboot is still owed from an install earlier this boot.
-  Future<void> init() => Future.wait([
-        _checkForUpdate(),
-        _checkForKernelUpdate(),
-        _refreshInstalledModulesVersion(),
-        _refreshSlotInfo(),
-        _refreshRebootPending(),
-      ]);
+  /// False on hardware this build isn't for (not a Xiaomi 17-series / sm8850
+  /// device). The updater is then hard-disabled: no probes, no pill, no
+  /// install — an sm8850 kernel would brick a different device.
+  bool deviceSupported = true;
+
+  /// Runs every update probe once root is granted — but first gates on the
+  /// device: on unsupported hardware nothing is probed or offered.
+  Future<void> init() async {
+    deviceSupported = isSupportedDevice(await _repo.deviceIdentity());
+    if (_disposed) return;
+    if (!deviceSupported) {
+      notifyListeners();
+      return;
+    }
+    await Future.wait([
+      _checkForUpdate(),
+      _checkForKernelUpdate(),
+      _refreshInstalledModulesVersion(),
+      _refreshSlotInfo(),
+      _refreshRebootPending(),
+    ]);
+  }
 
   Future<void> _checkForUpdate() async {
     final update = await _updates.check();
@@ -113,9 +125,11 @@ class UpdateController extends ChangeNotifier {
       availableKernelUpdate!.versionCode > installedModulesVersionCode;
 
   /// Anything to act on — the app APK, a kernel build, or a reboot still owed
-  /// from an install done earlier this boot.
+  /// from an install done earlier this boot. Always false on unsupported
+  /// hardware, so the update pill/dialog never appear there.
   bool get anyUpdateAvailable =>
-      rebootPending || availableUpdate != null || kernelUpdateAvailable;
+      deviceSupported &&
+      (rebootPending || availableUpdate != null || kernelUpdateAvailable);
 
   int get installedCount => updateTasks.where((t) => t.installed).length;
 
@@ -160,7 +174,7 @@ class UpdateController extends ChangeNotifier {
   /// app. A reboot afterwards activates the modules. UI reads [updateTasks] /
   /// [updatePhase]; nothing is flashed to the boot image by the app.
   Future<void> installAllUpdates() async {
-    if (combinedUpdateBusy) return;
+    if (combinedUpdateBusy || !deviceSupported) return;
     final app = availableUpdate;
     final kern = kernelUpdateAvailable ? availableKernelUpdate : null;
     if (app == null && kern == null) return;

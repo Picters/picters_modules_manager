@@ -69,7 +69,7 @@ void main() {
               koFiles: ['cfg80211.ko', 'mac80211.ko', '88XXau.ko', 'btusb.ko'],
               procModules: ['cfg80211', 'mac80211', '88XXau'],
               usb: ['0bda|8812|Realtek|RTL8812AU|00|88XXau'],
-              iface: ['wlan0|88XXau|up|803'],
+              iface: ['wlan0|88XXau|0x1003|803'],
             ),
           ));
       final state = await ModuleRepository(fake).scan();
@@ -87,6 +87,7 @@ void main() {
       expect(state.adapters.first.match!.driver, '88XXau');
       expect(state.interfaces.single.name, 'wlan0');
       expect(state.interfaces.single.monitor, isTrue); // ARPHRD 803
+      expect(state.interfaces.single.up, isTrue); // IFF_UP set (0x1003)
     });
 
     test('vendor qca_cld3 loaded reads as Stock mode', () async {
@@ -248,6 +249,65 @@ void main() {
             .slotInfo(),
         (false, ''),
       );
+    });
+  });
+
+  group('device gate (isSupportedDevice)', () {
+    test('parseDeviceIdentity reads SOC/BRAND/MARKET lines', () {
+      final id = parseDeviceIdentity(
+          'SOC:SM8850\nBRAND:Xiaomi\nMARKET:Xiaomi 17 Pro Max');
+      expect(id.socModel, 'SM8850');
+      expect(id.brand, 'Xiaomi');
+      expect(id.marketName, 'Xiaomi 17 Pro Max');
+    });
+
+    test('accepts every Xiaomi 17 model by market name', () {
+      for (final m in [
+        'Xiaomi 17',
+        'Xiaomi 17 Pro',
+        'Xiaomi 17 Pro Max',
+        'Xiaomi 17 Ultra',
+      ]) {
+        expect(
+          isSupportedDevice(
+              DeviceIdentity(socModel: 'SM8850', brand: 'Xiaomi', marketName: m)),
+          isTrue,
+          reason: m,
+        );
+      }
+    });
+
+    test('accepts the Xiaomi-branded sm8850 combo when market name is blank', () {
+      expect(
+        isSupportedDevice(const DeviceIdentity(
+            socModel: 'SM8850', brand: 'Xiaomi', marketName: '')),
+        isTrue,
+      );
+    });
+
+    test('rejects a different SoC even on a Xiaomi phone', () {
+      expect(
+        isSupportedDevice(const DeviceIdentity(
+            socModel: 'SM8750', brand: 'Xiaomi', marketName: '')),
+        isFalse,
+      );
+    });
+
+    test('rejects another vendor\'s sm8850 phone (no Xiaomi 17 market name)', () {
+      expect(
+        isSupportedDevice(const DeviceIdentity(
+            socModel: 'SM8850', brand: 'Samsung', marketName: 'Galaxy S30')),
+        isFalse,
+      );
+    });
+
+    test('deviceIdentity is one round-trip reading the gate props', () async {
+      final fake = FakeRootRunner(
+          (_) => const ShellResult(0, 'SOC:SM8850\nBRAND:Xiaomi\nMARKET:Xiaomi 17'));
+      final id = await ModuleRepository(fake).deviceIdentity();
+      expect(fake.scripts, hasLength(1));
+      expect(fake.lastScript, contains('ro.soc.model'));
+      expect(isSupportedDevice(id), isTrue);
     });
   });
 }

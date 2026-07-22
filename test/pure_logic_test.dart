@@ -59,8 +59,9 @@ void main() {
   });
 
   group('parseIfaceLines', () {
-    test('parses name/driver/up/monitor from a scan line', () {
-      final r = parseIfaceLines(['${ifaceMarker}wlan1|88XXau|up|803']);
+    test('parses name/driver/up/monitor from a scan line (IFF_UP flag)', () {
+      // 0x1003 has IFF_UP (bit 0); ARPHRD 803 = monitor.
+      final r = parseIfaceLines(['${ifaceMarker}wlan1|88XXau|0x1003|803']);
       expect(r, hasLength(1));
       expect(r.first.name, 'wlan1');
       expect(r.first.driver, '88XXau');
@@ -68,15 +69,38 @@ void main() {
       expect(r.first.monitor, isTrue); // ARPHRD 803 = radiotap/monitor
     });
 
-    test('type 1 (ether) is managed, down operstate is not up', () {
-      final r = parseIfaceLines(['${ifaceMarker}wlan0|qca_cld3|down|1']);
+    test('type 1 (ether) is managed; IFF_UP clear reads as down', () {
+      // 0x1002 = IFF_BROADCAST|... but NOT IFF_UP (bit 0) → admin-down.
+      final r = parseIfaceLines(['${ifaceMarker}wlan0|qca_cld3|0x1002|1']);
       expect(r.first.monitor, isFalse);
       expect(r.first.up, isFalse);
     });
 
+    test('a monitor VIF admin-up reads up even with no carrier', () {
+      // Real monitor case: IFF_UP set (0x1003) though operstate is "unknown".
+      final r = parseIfaceLines(['${ifaceMarker}wlan0|88x2bu|0x1003|803']);
+      expect(r.first.up, isTrue);
+      expect(r.first.monitor, isTrue);
+    });
+
     test('skips noise and lines with an empty interface name', () {
-      final r = parseIfaceLines(['noise', '$ifaceMarker|88XXau|up|1']);
+      final r = parseIfaceLines(['noise', '$ifaceMarker|88XXau|0x1003|1']);
       expect(r, isEmpty);
+    });
+  });
+
+  group('ifaceFlagUp', () {
+    test('IFF_UP (bit 0) decides admin up/down', () {
+      expect(ifaceFlagUp('0x1003'), isTrue); // ...0011 → IFF_UP set
+      expect(ifaceFlagUp('0x1002'), isFalse); // ...0010 → IFF_UP clear
+      expect(ifaceFlagUp('0x1'), isTrue);
+      expect(ifaceFlagUp('0x0'), isFalse);
+    });
+
+    test('tolerates whitespace, missing 0x, and garbage', () {
+      expect(ifaceFlagUp(' 1003 '), isTrue); // bare hex
+      expect(ifaceFlagUp(''), isFalse);
+      expect(ifaceFlagUp('xyz'), isFalse);
     });
   });
 

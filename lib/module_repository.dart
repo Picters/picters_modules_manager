@@ -26,6 +26,9 @@ const String _mProc = '___PMM_PROC___';
 const String kBootConfigDir = '/data/adb/picters_modules_manager';
 const String kBootLoadFlag = '$kBootConfigDir/boot_load_enabled';
 
+/// Cosmetic app flag (same config dir): hides the Performance tab.
+const String kHidePerfFlag = '$kBootConfigDir/hide_performance';
+
 /// Thrown before any root command runs when a precondition fails — e.g. loading
 /// an adapter while the injection Wi-Fi stack is off.
 class ModulePrecondition implements Exception {
@@ -33,6 +36,16 @@ class ModulePrecondition implements Exception {
   final String message;
   @override
   String toString() => message;
+}
+
+/// True when the netdev's `flags` hex bitmask has IFF_UP (bit 0) set — the
+/// admin up/down state (what `ip link set up/down` drives), unlike operstate
+/// which stays "unknown"/"down" for a monitor VIF or an unassociated station.
+bool ifaceFlagUp(String flags) {
+  var s = flags.trim().toLowerCase();
+  if (s.startsWith('0x')) s = s.substring(2);
+  final v = int.tryParse(s, radix: 16) ?? 0;
+  return v & 0x1 != 0; // IFF_UP
 }
 
 /// Parses the lines produced by [ifaceScanFragment] into [WifiInterface]s.
@@ -47,11 +60,60 @@ List<WifiInterface> parseIfaceLines(Iterable<String> lines) {
     out.add(WifiInterface(
       name: name,
       driver: f.length > 1 ? f[1].trim() : '',
-      up: f.length > 2 && f[2].trim() == 'up',
+      up: f.length > 2 && ifaceFlagUp(f[2]),
       monitor: f.length > 3 && f[3].trim() == '803',
     ));
   }
   return out;
+}
+
+/// The device-identity props the updater gates on.
+class DeviceIdentity {
+  const DeviceIdentity({
+    required this.socModel,
+    required this.brand,
+    required this.marketName,
+  });
+
+  /// `ro.soc.model`, e.g. "SM8850" — the whole Xiaomi 17 series shares it.
+  final String socModel;
+
+  /// `ro.product.brand`, e.g. "Xiaomi".
+  final String brand;
+
+  /// `ro.product.marketname`, e.g. "Xiaomi 17" / "Xiaomi 17 Pro Max".
+  final String marketName;
+
+  static const empty =
+      DeviceIdentity(socModel: '', brand: '', marketName: '');
+}
+
+/// Parses the `SOC:`/`BRAND:`/`MARKET:` lines from [ModuleRepository.deviceIdentity].
+DeviceIdentity parseDeviceIdentity(String out) {
+  String soc = '', brand = '', market = '';
+  for (final raw in out.split('\n')) {
+    final line = raw.trim();
+    if (line.startsWith('SOC:')) {
+      soc = line.substring(4).trim();
+    } else if (line.startsWith('BRAND:')) {
+      brand = line.substring(6).trim();
+    } else if (line.startsWith('MARKET:')) {
+      market = line.substring(7).trim();
+    }
+  }
+  return DeviceIdentity(socModel: soc, brand: brand, marketName: market);
+}
+
+/// True for a Xiaomi 17-series phone (base / Pro / Pro Max / Ultra). They all
+/// use the sm8850 SoC the kernel + OOT modules are built for, so the updater
+/// only offers a build to one of these — never to a device it could brick.
+/// Accepts either an explicit "Xiaomi 17…" market name or the Xiaomi-branded
+/// sm8850 combo (market name is blank on some builds; the SoC never is).
+bool isSupportedDevice(DeviceIdentity id) {
+  final market = id.marketName.toLowerCase().trim();
+  if (market.startsWith('xiaomi 17')) return true;
+  return id.brand.toLowerCase().trim() == 'xiaomi' &&
+      id.socModel.toLowerCase().trim() == 'sm8850';
 }
 
 class ModuleRepository {
@@ -168,6 +230,18 @@ class ModuleRepository {
         enabled
             ? "mkdir -p '$kBootConfigDir' && touch '$kBootLoadFlag'"
             : "rm -f '$kBootLoadFlag'",
+      );
+
+  /// Whether the Performance tab is hidden.
+  Future<bool> hidePerformance() async {
+    final r = await _shell.run("[ -f '$kHidePerfFlag' ] && echo Y || echo N");
+    return r.stdout.contains('Y');
+  }
+
+  Future<void> setHidePerformance(bool hide) => _shell.run(
+        hide
+            ? "mkdir -p '$kBootConfigDir' && touch '$kHidePerfFlag'"
+            : "rm -f '$kHidePerfFlag'",
       );
 
   // ── High-level Wi-Fi mode switch (the main screen) ──────────────────────
@@ -575,6 +649,18 @@ class ModuleRepository {
   Future<String> kernelRelease() async {
     final r = await _shell.run('uname -r 2>/dev/null');
     return r.stdout.trim();
+  }
+
+  /// The device-identity props the updater gates on (one round-trip). The
+  /// kernel + OOT modules are built for the Xiaomi 17 series' sm8850 SoC, so
+  /// this decides whether it's safe to offer an update at all.
+  Future<DeviceIdentity> deviceIdentity() async {
+    final r = await _shell.run(
+      'echo "SOC:\$(getprop ro.soc.model)"; '
+      'echo "BRAND:\$(getprop ro.product.brand)"; '
+      'echo "MARKET:\$(getprop ro.product.marketname)"',
+    );
+    return parseDeviceIdentity(r.stdout);
   }
 
   /// A UUID that changes on every boot — lets the app tell whether a reboot has

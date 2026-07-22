@@ -65,6 +65,7 @@ class PerformanceScreen extends StatelessWidget {
                       cluster: state.clusters[i],
                       label: clusterLabel(state.clusters[i], state.clusters),
                       profile: controller.profile,
+                      domain: cpuDomain(state.clusters[i], state.clusters),
                     ),
                   ],
                 ],
@@ -96,7 +97,7 @@ class PerformanceScreen extends StatelessWidget {
 }
 
 IconData _profileIcon(PerfProfile p) => switch (p) {
-      PerfProfile.cool => Icons.ac_unit,
+      PerfProfile.eco => Icons.ac_unit,
       PerfProfile.balanced => Icons.balance,
       PerfProfile.full => Icons.bolt,
     };
@@ -234,11 +235,13 @@ class _ClusterRow extends StatelessWidget {
     required this.cluster,
     required this.label,
     required this.profile,
+    required this.domain,
   });
 
   final CpuCluster cluster;
   final String label;
   final PerfProfile profile;
+  final PerfDomain domain;
 
   @override
   Widget build(BuildContext context) {
@@ -246,7 +249,8 @@ class _ClusterRow extends StatelessWidget {
     // Show the cap this profile sets — not the live scaling_max_freq, which the
     // vendor perf daemon (perfd) constantly rewrites, so it would flicker and
     // read wrong at Full.
-    final cap = cappedMax(profile, cluster.maxHardware, cluster.availableFreqs);
+    final cap =
+        cappedMax(profile, domain, cluster.maxHardware, cluster.availableFreqs);
     final capped = profile != PerfProfile.full;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -275,7 +279,7 @@ class _GpuRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final cap = cappedMax(profile, gpu.stockMax, gpu.availableFreqs);
+    final cap = cappedMax(profile, PerfDomain.gpu, gpu.stockMax, gpu.availableFreqs);
     final capped = profile != PerfProfile.full;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),

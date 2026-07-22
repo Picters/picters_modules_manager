@@ -10,27 +10,20 @@ library;
 
 /// A frequency-cap preset. `full` restores the stock maximum; the others cap
 /// down for less heat and better battery.
-enum PerfProfile { cool, balanced, full }
+enum PerfProfile { eco, balanced, full }
 
 extension PerfProfileX on PerfProfile {
   String get label => switch (this) {
-        PerfProfile.cool => 'Cool',
+        PerfProfile.eco => 'Eco',
         PerfProfile.balanced => 'Balanced',
         PerfProfile.full => 'Full',
       };
 
   String get blurb => switch (this) {
-        PerfProfile.cool => 'Coolest and longest battery — caps clocks hard.',
-        PerfProfile.balanced => 'A middle ground — trims the top clocks.',
+        PerfProfile.eco =>
+          'Coolest and longest battery — hard caps, prime cores hit hardest.',
+        PerfProfile.balanced => 'Cooler but still snappy — trims the top clocks.',
         PerfProfile.full => 'Stock clocks — full performance.',
-      };
-
-  /// Fraction of each domain's stock max this profile targets before snapping
-  /// to a real OPP step. Full is exactly the stock max.
-  double get fraction => switch (this) {
-        PerfProfile.cool => 0.60,
-        PerfProfile.balanced => 0.80,
-        PerfProfile.full => 1.0,
       };
 
   static PerfProfile? fromName(String? name) {
@@ -40,6 +33,27 @@ extension PerfProfileX on PerfProfile {
     return null;
   }
 }
+
+/// A frequency domain. Caps are asymmetric — the prime cores are the main heat
+/// source, so they're hit harder than the perf cores.
+enum PerfDomain { primeCpu, perfCpu, gpu }
+
+/// Fraction of a domain's stock max a profile targets before snapping to a real
+/// OPP step. Full is stock; prime is capped the hardest.
+double profileFraction(PerfProfile profile, PerfDomain domain) =>
+    switch (profile) {
+      PerfProfile.full => 1.0,
+      PerfProfile.eco => switch (domain) {
+          PerfDomain.primeCpu => 0.46,
+          PerfDomain.perfCpu => 0.53,
+          PerfDomain.gpu => 0.47,
+        },
+      PerfProfile.balanced => switch (domain) {
+          PerfDomain.primeCpu => 0.68,
+          PerfDomain.perfCpu => 0.69,
+          PerfDomain.gpu => 0.72,
+        },
+    };
 
 /// The highest frequency in [available] that is `<= target`, never below the
 /// lowest available step. [available] must be non-empty. The result is always a
@@ -57,13 +71,18 @@ int snapDownToAvailable(List<int> available, int target) {
   return pick;
 }
 
-/// The capped max frequency for a domain whose stock ceiling is [stockMax] and
-/// whose OPP table is [available], under [profile]. Full returns exactly
-/// [stockMax]; the others snap `fraction * stockMax` down to a real step. Never
-/// exceeds [stockMax].
-int cappedMax(PerfProfile profile, int stockMax, List<int> available) {
+/// The capped max frequency for [domain] (stock ceiling [stockMax], OPP table
+/// [available]) under [profile]. Full returns exactly [stockMax]; the others
+/// snap `profileFraction * stockMax` down to a real step. Never exceeds
+/// [stockMax].
+int cappedMax(
+  PerfProfile profile,
+  PerfDomain domain,
+  int stockMax,
+  List<int> available,
+) {
   if (profile == PerfProfile.full || available.isEmpty) return stockMax;
-  final target = (stockMax * profile.fraction).round();
+  final target = (stockMax * profileFraction(profile, domain)).round();
   final snapped = snapDownToAvailable(available, target);
   return snapped > stockMax ? stockMax : snapped;
 }
@@ -166,6 +185,14 @@ String clusterLabel(CpuCluster c, List<CpuCluster> all) {
   final minOfAll = all.map((e) => e.maxHardware).reduce((a, b) => a < b ? a : b);
   if (c.maxHardware == minOfAll && all.length >= 3) return 'Efficiency cores';
   return 'Performance cores';
+}
+
+/// Which cap domain a CPU cluster belongs to — the highest-clocked cluster is
+/// the prime (hit hardest); the rest are perf cores.
+PerfDomain cpuDomain(CpuCluster c, List<CpuCluster> all) {
+  if (all.isEmpty) return PerfDomain.perfCpu;
+  final maxOfAll = all.map((e) => e.maxHardware).reduce((a, b) => a > b ? a : b);
+  return c.maxHardware == maxOfAll ? PerfDomain.primeCpu : PerfDomain.perfCpu;
 }
 
 /// "2.11 GHz" from a kHz cpufreq value.

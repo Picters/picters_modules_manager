@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'adapter_panel.dart';
 import 'app_controller.dart';
 import 'module_info.dart';
 import 'theme.dart';
@@ -193,15 +194,37 @@ class OverviewScreen extends StatelessWidget {
                               child: Column(
                                 children: [
                                   if (i > 0) const CardDivider(),
-                                  _AdapterRow(
-                                    adapter: devices[i],
-                                    state: state,
-                                    busy: devices[i].recognized &&
-                                        controller.moduleBusy.contains(
-                                          devices[i].match!.driver,
-                                        ),
-                                    onLoad: () =>
-                                        _loadAdapter(context, devices[i]),
+                                  Builder(
+                                    builder: (rowContext) {
+                                      // Only a recognised Wi-Fi chipset gets the
+                                      // config panel — a loaded non-Wi-Fi USB
+                                      // device (network dongle, storage, etc.)
+                                      // has nothing here to configure, so it
+                                      // just reads "Loaded" with no tap target.
+                                      final iface = devices[i].recognized
+                                          ? matchingIface(
+                                              devices[i], state.interfaces)
+                                          : null;
+                                      return _AdapterRow(
+                                        adapter: devices[i],
+                                        state: state,
+                                        iface: iface,
+                                        busy: devices[i].recognized &&
+                                            controller.moduleBusy.contains(
+                                              devices[i].match!.driver,
+                                            ),
+                                        onLoad: () =>
+                                            _loadAdapter(context, devices[i]),
+                                        onConfigure: iface == null
+                                            ? null
+                                            : () => showAdapterConfigPanel(
+                                                  context,
+                                                  origin: _rowCenter(rowContext),
+                                                  ifaceName: iface.name,
+                                                  controller: controller,
+                                                ),
+                                      );
+                                    },
                                   ),
                                 ],
                               ),
@@ -214,6 +237,16 @@ class OverviewScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// The row's on-screen centre — the jelly panel grows from here.
+  Offset _rowCenter(BuildContext rowContext) {
+    final box = rowContext.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) {
+      final size = MediaQuery.sizeOf(rowContext);
+      return Offset(size.width / 2, size.height / 2);
+    }
+    return box.localToGlobal(box.size.center(Offset.zero));
   }
 }
 
@@ -485,8 +518,10 @@ class _WifiSegmented extends StatelessWidget {
           child: Stack(
             children: [
               // The sliding tablet — hidden (faded out) while Wi-Fi is off.
+              // easeOutCubic stops at the target (no overshoot past the wall);
+              // the JellyStretch supplies the squish-into-wall.
               AnimatedPositioned(
-                duration: const Duration(milliseconds: 260),
+                duration: const Duration(milliseconds: 320),
                 curve: Curves.easeOutCubic,
                 top: 0,
                 bottom: 0,
@@ -495,10 +530,13 @@ class _WifiSegmented extends StatelessWidget {
                 child: AnimatedOpacity(
                   duration: const Duration(milliseconds: 180),
                   opacity: isOff ? 0 : 1,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: scheme.primary,
-                      borderRadius: BorderRadius.circular(14),
+                  child: JellyStretch(
+                    trigger: index,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: scheme.primary,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                   ),
                 ),
@@ -574,11 +612,8 @@ class _WifiSeg extends StatelessWidget {
     final color = selected ? scheme.onPrimary : scheme.onSurfaceVariant;
 
     return Expanded(
-      child: InkWell(
+      child: JellyTap(
         onTap: onTap,
-        customBorder: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(14)),
-        ),
         // Fill the full cell height so the whole glowing tablet is tappable,
         // not just the band where the icon+label sit.
         child: SizedBox(
@@ -768,18 +803,37 @@ class _HeroIcon extends StatelessWidget {
   }
 }
 
+/// The live netdev an adapter's driver exposes (e.g. `wlan0`), matched by
+/// bound driver name — null while the driver isn't loaded/hasn't brought an
+/// interface up yet. Shared by the row's status label and its tap target.
+WifiInterface? matchingIface(DetectedAdapter adapter, List<WifiInterface> interfaces) {
+  final driver = adapter.device.driver;
+  if (driver.isEmpty) return null;
+  for (final i in interfaces) {
+    if (i.driver.isNotEmpty && i.driver == driver) return i;
+  }
+  return null;
+}
+
 class _AdapterRow extends StatelessWidget {
   const _AdapterRow({
     required this.adapter,
     required this.state,
+    required this.iface,
     required this.busy,
     required this.onLoad,
+    required this.onConfigure,
   });
 
   final DetectedAdapter adapter;
   final SystemState state;
+
+  /// The adapter's live netdev, if its driver is loaded and up — tapping the
+  /// row opens its config panel only when this is non-null.
+  final WifiInterface? iface;
   final bool busy;
   final VoidCallback onLoad;
+  final VoidCallback? onConfigure;
 
   @override
   Widget build(BuildContext context) {
@@ -810,16 +864,6 @@ class _AdapterRow extends StatelessWidget {
 
     final canLoad = adapter.recognized && appModule != null && !inSystem;
 
-    // The netdev this adapter's driver exposes (wlan0…), shown instead of a
-    // generic "Loaded" once it's up.
-    String? ifaceName;
-    for (final i in state.interfaces) {
-      if (i.driver.isNotEmpty && i.driver == device.driver) {
-        ifaceName = i.name;
-        break;
-      }
-    }
-
     final Widget trailing;
     if (busy) {
       trailing = MorphingPolygon(
@@ -836,7 +880,7 @@ class _AdapterRow extends StatelessWidget {
     } else if (inSystem) {
       trailing = _StatusTablet(
         key: const ValueKey('active'),
-        label: ifaceName ?? (loaded ? 'Loaded' : 'Active'),
+        label: iface?.name ?? (loaded ? 'Loaded' : 'Active'),
         bg: scheme.tertiaryContainer,
         fg: scheme.onTertiaryContainer,
       );
@@ -903,7 +947,14 @@ class _AdapterRow extends StatelessWidget {
 
     // Dim the whole row (icon, name, driver line, tablet) so "Not found" reads
     // as inert rather than a live, tappable adapter.
-    return notFound ? Opacity(opacity: 0.5, child: tile) : tile;
+    final dimmed = notFound ? Opacity(opacity: 0.5, child: tile) : tile;
+
+    // Only a row with somewhere to go (its config panel) gets the jelly
+    // squash-and-tilt — everything else stays a plain, inert row.
+    final onConfigure = this.onConfigure;
+    return onConfigure == null
+        ? dimmed
+        : JellyTap(onTap: onConfigure, child: dimmed);
   }
 }
 

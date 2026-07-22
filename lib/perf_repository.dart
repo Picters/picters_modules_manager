@@ -64,7 +64,8 @@ class PerfRepository {
     final b = StringBuffer();
     final cpuLines = <String>[];
     for (final c in state.clusters) {
-      final freq = cappedMax(profile, c.maxHardware, c.availableFreqs);
+      final freq = cappedMax(
+          profile, cpuDomain(c, state.clusters), c.maxHardware, c.availableFreqs);
       final node = '$_cpuBase/${c.policy}/scaling_max_freq';
       b.writeln("echo $freq > '$node' 2>/dev/null");
       cpuLines.add('cpu $_cpuBase/${c.policy} $freq');
@@ -72,7 +73,8 @@ class PerfRepository {
     String? gpuLine;
     final gpu = state.gpu;
     if (gpu != null && gpu.stockMax > 0) {
-      final gfreq = cappedMax(profile, gpu.stockMax, gpu.availableFreqs);
+      final gfreq =
+          cappedMax(profile, PerfDomain.gpu, gpu.stockMax, gpu.availableFreqs);
       b.writeln("echo $gfreq > '$kGpuMaxNode' 2>/dev/null");
       gpuLine = 'gpu $gfreq';
     }
