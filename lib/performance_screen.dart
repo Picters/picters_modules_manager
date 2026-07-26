@@ -49,6 +49,7 @@ class PerformanceScreen extends StatelessWidget {
               _ProfileHero(
                 profile: controller.profile,
                 busy: controller.busy,
+                hardCaps: state.kernelCapsSupported,
                 onSelect: (p) => _select(context, p),
               )
             else
@@ -97,6 +98,7 @@ class PerformanceScreen extends StatelessWidget {
 }
 
 IconData _profileIcon(PerfProfile p) => switch (p) {
+      PerfProfile.ultraEco => Icons.severe_cold,
       PerfProfile.eco => Icons.ac_unit,
       PerfProfile.balanced => Icons.balance,
       PerfProfile.full => Icons.bolt,
@@ -108,11 +110,15 @@ class _ProfileHero extends StatelessWidget {
   const _ProfileHero({
     required this.profile,
     required this.busy,
+    required this.hardCaps,
     required this.onSelect,
   });
 
   final PerfProfile profile;
   final bool busy;
+
+  /// The running kernel pins the ceilings itself (CONFIG_PICTERS_PERF).
+  final bool hardCaps;
   final ValueChanged<PerfProfile> onSelect;
 
   @override
@@ -211,7 +217,7 @@ class _ProfileHero extends StatelessWidget {
                       for (final p in PerfProfile.values)
                         ButtonSegment(
                           value: p,
-                          label: Text(p.label),
+                          label: Text(p.shortLabel),
                         ),
                     ],
                     selected: {profile},
@@ -221,6 +227,16 @@ class _ProfileHero extends StatelessWidget {
                 ),
               ),
             ),
+            if (!hardCaps) ...[
+              const SizedBox(height: 12),
+              Text(
+                'This kernel has no in-kernel ceilings, so the vendor perf '
+                'service keeps raising the clocks back and the module has to '
+                'chase it. Flash the newest kernel for caps that hold.',
+                style: textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+            ],
           ],
         ),
       ),

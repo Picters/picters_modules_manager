@@ -14,6 +14,14 @@ const String _cpuBase = '/sys/devices/system/cpu/cpufreq';
 const String kModuleService =
     '/data/adb/modules/picters-modules-pack/service.sh';
 
+/// In-kernel per-policy FREQ_QOS ceilings (CONFIG_PICTERS_PERF). Unlike a write
+/// to scaling_max_freq, the vendor perf HAL can't raise these back, so a cap
+/// holds on its own. Absent on older kernels — then the module's re-apply loop
+/// is what keeps the ceiling, and the deepest profiles are less reliable.
+const String kKernelPerfDir = '/sys/kernel/picters_perf';
+const String kKernelCpuMaxNode = '$kKernelPerfDir/cpu_max_freq';
+const String kKernelProfileNode = '$kKernelPerfDir/profile';
+
 List<int> _parseFreqList(String s) => s
     .trim()
     .split(RegExp(r'\s+'))
@@ -48,7 +56,8 @@ class PerfRepository {
       'echo __PERF_CONF__; '
       'cat $kPerfConfig 2>/dev/null; '
       'echo __PERF_CAP__; '
-      "grep -qF 'perf.conf' '$kModuleService' 2>/dev/null && echo PERF_BOOT_OK",
+      "grep -qF 'perf.conf' '$kModuleService' 2>/dev/null && echo PERF_BOOT_OK; "
+      "[ -w '$kKernelCpuMaxNode' ] && echo PERF_KERNEL_OK",
     );
     return parsePerfScan(r.stdout);
   }
@@ -63,12 +72,26 @@ class PerfRepository {
   }) {
     final b = StringBuffer();
     final cpuLines = <String>[];
+    // "<first-cpu>:<khz>" pairs for the in-kernel ceilings; also persisted so
+    // the boot service can re-pin them without recomputing the profile.
+    final kernelPairs = <String>[];
     for (final c in state.clusters) {
       final freq = cappedMax(
           profile, cpuDomain(c, state.clusters), c.maxHardware, c.availableFreqs);
       final node = '$_cpuBase/${c.policy}/scaling_max_freq';
       b.writeln("echo $freq > '$node' 2>/dev/null");
       cpuLines.add('cpu $_cpuBase/${c.policy} $freq');
+      final cpu = firstCpuOf(c);
+      // khz 0 drops the kernel request entirely, so Full really is stock rather
+      // than a ceiling that happens to sit at the maximum.
+      if (cpu != null) {
+        kernelPairs.add('$cpu:${profile == PerfProfile.full ? 0 : freq}');
+      }
+    }
+    if (state.kernelCapsSupported && kernelPairs.isNotEmpty) {
+      b.writeln(
+          "echo '${kernelPairs.join(' ')}' > '$kKernelCpuMaxNode' 2>/dev/null");
+      b.writeln("echo '${profile.name}' > '$kKernelProfileNode' 2>/dev/null");
     }
     String? gpuLine;
     final gpu = state.gpu;
@@ -92,6 +115,9 @@ class PerfRepository {
     for (final l in cpuLines) {
       b.writeln('echo "$l" >> "\$C"');
     }
+    if (kernelPairs.isNotEmpty) {
+      b.writeln('echo "kcpu ${kernelPairs.join(' ')}" >> "\$C"');
+    }
     if (gpuLine != null) b.writeln('echo "$gpuLine" >> "\$C"');
     b.writeln('echo OK_PERF');
     return _shell.run(b.toString(), timeout: const Duration(seconds: 20));
@@ -110,6 +136,7 @@ PerfState parsePerfScan(String out) {
   final conf = <String, String>{};
   final confCpu = <String, int>{}; // policyPath -> freq (unused for state, kept simple)
   var bootOk = false;
+  var kernelOk = false;
 
   for (final raw in lines) {
     final line = raw.trim();
@@ -163,6 +190,7 @@ PerfState parsePerfScan(String out) {
         break;
       case 4:
         if (line == 'PERF_BOOT_OK') bootOk = true;
+        if (line == 'PERF_KERNEL_OK') kernelOk = true;
         break;
     }
   }
@@ -204,5 +232,6 @@ PerfState parsePerfScan(String out) {
     profile: PerfProfileX.fromName(conf['profile']),
     persistOnBoot: conf['enabled'] == '1',
     bootApplySupported: bootOk,
+    kernelCapsSupported: kernelOk,
   );
 }

@@ -66,10 +66,68 @@ void main() {
     test('empty OPP table falls back to stock (never writes a bogus value)', () {
       expect(cappedMax(PerfProfile.eco, perf, stock, const []), stock);
     });
+
+    test('Ultra Eco is strictly below Eco on every domain', () {
+      for (final d in PerfDomain.values) {
+        expect(
+          cappedMax(PerfProfile.ultraEco, d, stock, p0),
+          lessThan(cappedMax(PerfProfile.eco, d, stock, p0)),
+          reason: 'ultraEco must cap harder than eco for $d',
+        );
+      }
+    });
+
+    test('profiles are ordered coolest-first', () {
+      // The selector renders PerfProfile.values in order, so the enum order is
+      // part of the UI contract, not just an implementation detail.
+      expect(PerfProfile.values, [
+        PerfProfile.ultraEco,
+        PerfProfile.eco,
+        PerfProfile.balanced,
+        PerfProfile.full,
+      ]);
+      for (var i = 1; i < PerfProfile.values.length; i++) {
+        expect(
+          cappedMax(PerfProfile.values[i - 1], perf, stock, p0),
+          lessThan(cappedMax(PerfProfile.values[i], perf, stock, p0)),
+        );
+      }
+    });
+  });
+
+  group('firstCpuOf', () {
+    test('takes the lowest related CPU', () {
+      const c = CpuCluster(
+        policy: 'policy6',
+        cpus: [7, 6],
+        maxHardware: 4608000,
+        scalingMax: 4608000,
+        availableFreqs: [],
+        governor: 'walt',
+      );
+      expect(firstCpuOf(c), 6);
+    });
+
+    test('falls back to the policy dir name when related_cpus is unreadable', () {
+      const c = CpuCluster(
+        policy: 'policy6',
+        cpus: [],
+        maxHardware: 4608000,
+        scalingMax: 4608000,
+        availableFreqs: [],
+        governor: 'walt',
+      );
+      expect(firstCpuOf(c), 6);
+    });
   });
 
   group('parsePerfScan', () {
-    String scan({required String conf, bool bootOk = false}) => '''
+    String scan({
+      required String conf,
+      bool bootOk = false,
+      bool kernelOk = false,
+    }) =>
+        '''
 __PERF_CPU__
 P:policy0|0 1 2 3 4 5|3628800|3628800|walt
 F:policy0|384000 2112000 3628800
@@ -81,7 +139,8 @@ GMAX:902000000
 __PERF_CONF__
 $conf
 __PERF_CAP__
-${bootOk ? 'PERF_BOOT_OK' : ''}''';
+${bootOk ? 'PERF_BOOT_OK' : ''}
+${kernelOk ? 'PERF_KERNEL_OK' : ''}''';
 
     test('parses clusters, GPU and the persisted profile from config', () {
       final s = parsePerfScan(scan(conf: '''
@@ -123,6 +182,14 @@ gpu 422000000'''));
       expect(parsePerfScan(scan(conf: '', bootOk: true)).bootApplySupported,
           isTrue);
       expect(parsePerfScan(scan(conf: '', bootOk: false)).bootApplySupported,
+          isFalse);
+    });
+
+    test('in-kernel ceilings are detected from their own marker', () {
+      expect(parsePerfScan(scan(conf: '', kernelOk: true)).kernelCapsSupported,
+          isTrue);
+      // Present module support must not be mistaken for kernel support.
+      expect(parsePerfScan(scan(conf: '', bootOk: true)).kernelCapsSupported,
           isFalse);
     });
   });

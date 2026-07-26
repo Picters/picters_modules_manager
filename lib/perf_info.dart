@@ -10,16 +10,28 @@ library;
 
 /// A frequency-cap preset. `full` restores the stock maximum; the others cap
 /// down for less heat and better battery.
-enum PerfProfile { eco, balanced, full }
+enum PerfProfile { ultraEco, eco, balanced, full }
 
 extension PerfProfileX on PerfProfile {
   String get label => switch (this) {
+        PerfProfile.ultraEco => 'Ultra Eco',
+        PerfProfile.eco => 'Eco',
+        PerfProfile.balanced => 'Balanced',
+        PerfProfile.full => 'Full',
+      };
+
+  /// Fits four segments across a phone-width selector.
+  String get shortLabel => switch (this) {
+        PerfProfile.ultraEco => 'Ultra',
         PerfProfile.eco => 'Eco',
         PerfProfile.balanced => 'Balanced',
         PerfProfile.full => 'Full',
       };
 
   String get blurb => switch (this) {
+        PerfProfile.ultraEco =>
+          'For heat, not speed — roughly a third of stock clocks. Made for '
+              'reading, messaging and navigation in direct sun.',
         PerfProfile.eco =>
           'Coolest and longest battery — hard caps, prime cores hit hardest.',
         PerfProfile.balanced => 'Cooler but still snappy — trims the top clocks.',
@@ -43,6 +55,14 @@ enum PerfDomain { primeCpu, perfCpu, gpu }
 double profileFraction(PerfProfile profile, PerfDomain domain) =>
     switch (profile) {
       PerfProfile.full => 1.0,
+      // Deliberately below Eco on every domain: the point is sustained heat, so
+      // the prime cluster is pulled under the perf cluster's ceiling and the
+      // scheduler stops reaching for it under load.
+      PerfProfile.ultraEco => switch (domain) {
+          PerfDomain.primeCpu => 0.28,
+          PerfDomain.perfCpu => 0.33,
+          PerfDomain.gpu => 0.30,
+        },
       PerfProfile.eco => switch (domain) {
           PerfDomain.primeCpu => 0.46,
           PerfDomain.perfCpu => 0.53,
@@ -148,6 +168,7 @@ class PerfState {
     required this.profile,
     required this.persistOnBoot,
     required this.bootApplySupported,
+    this.kernelCapsSupported = false,
   });
 
   final List<CpuCluster> clusters;
@@ -164,6 +185,11 @@ class PerfState {
   /// The vendor perf HAL rewrites scaling_max_freq, so without that loop a cap
   /// can't be enforced — the UI blocks the controls and asks for a module update.
   final bool bootApplySupported;
+
+  /// Whether the running kernel exposes the in-kernel FREQ_QOS ceilings
+  /// (CONFIG_PICTERS_PERF). When it does, a cap can't be raised back by the
+  /// vendor perf HAL, so the deepest profiles actually hold.
+  final bool kernelCapsSupported;
 
   bool get isEmpty => clusters.isEmpty;
 
@@ -185,6 +211,14 @@ String clusterLabel(CpuCluster c, List<CpuCluster> all) {
   final minOfAll = all.map((e) => e.maxHardware).reduce((a, b) => a < b ? a : b);
   if (c.maxHardware == minOfAll && all.length >= 3) return 'Efficiency cores';
   return 'Performance cores';
+}
+
+/// The CPU that leads [c]'s cpufreq policy — the key the in-kernel ceilings are
+/// addressed by. Taken from related_cpus, falling back to the "policyN" dir
+/// name, which is that same number. Null when neither can be read.
+int? firstCpuOf(CpuCluster c) {
+  if (c.cpus.isNotEmpty) return c.cpus.reduce((a, b) => a < b ? a : b);
+  return int.tryParse(c.policy.replaceFirst('policy', ''));
 }
 
 /// Which cap domain a CPU cluster belongs to — the highest-clocked cluster is
