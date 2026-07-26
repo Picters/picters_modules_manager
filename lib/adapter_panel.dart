@@ -12,36 +12,30 @@ import 'widgets.dart';
 
 const double _kMinTxPowerDbm = 0;
 
-/// Opens the per-interface config panel for [ifaceName] as a jelly card
-/// unfolding from [origin] (the tapped row's position): monitor/managed, link
-/// up/down, regulatory domain unlock and tx power. Reads [controller]'s live
-/// scan directly (not a snapshot), so the panel tracks the interface's real
-/// state in real time — including closing itself if the adapter disappears.
-Future<void> showAdapterConfigPanel(
-  BuildContext context, {
-  required Offset origin,
-  required String ifaceName,
-  required AppController controller,
-}) {
-  return showJellyPanel<void>(
-    context,
-    origin: origin,
-    builder: (context) =>
-        _AdapterConfigSheet(ifaceName: ifaceName, controller: controller),
-  );
-}
-
-class _AdapterConfigSheet extends StatefulWidget {
-  const _AdapterConfigSheet({required this.ifaceName, required this.controller});
+/// The per-interface controls: monitor/managed, link up/down and tx power.
+/// Rendered inline underneath its adapter row on the Overview screen, so the
+/// controls unfold in place next to the device they belong to instead of
+/// covering it with a floating panel.
+class AdapterConfigView extends StatefulWidget {
+  const AdapterConfigView({
+    super.key,
+    required this.ifaceName,
+    required this.controller,
+    this.inline = false,
+  });
 
   final String ifaceName;
   final AppController controller;
 
+  /// Embedded in the row rather than floating in its own panel: no card, no
+  /// fixed width, no close button — the row owns all of that.
+  final bool inline;
+
   @override
-  State<_AdapterConfigSheet> createState() => _AdapterConfigSheetState();
+  State<AdapterConfigView> createState() => _AdapterConfigViewState();
 }
 
-class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
+class _AdapterConfigViewState extends State<AdapterConfigView> {
   bool _busyMode = false;
   bool _busyLink = false;
   bool _busyTx = false;
@@ -306,15 +300,7 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
         .clamp(_kMinTxPowerDbm, maxDbm);
     final stock = _stockTxDbm ?? _iw.stockTxSync(driver);
 
-    return Material(
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(24),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        width: width,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-          child: Column(
+    final content = Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -345,20 +331,21 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  JellyTap(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest,
-                        shape: BoxShape.circle,
+                  if (!widget.inline)
+                    JellyTap(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.close,
+                            size: 18, color: scheme.onSurfaceVariant),
                       ),
-                      child: Icon(Icons.close,
-                          size: 18, color: scheme.onSurfaceVariant),
                     ),
-                  ),
                 ],
               ),
               if (_modeDesync) ...[
@@ -477,7 +464,24 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
                       ),
               ),
             ],
-          ),
+          );
+
+    if (widget.inline) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: content,
+      );
+    }
+
+    return Material(
+      color: scheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(24),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: width,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+          child: content,
         ),
       ),
     );

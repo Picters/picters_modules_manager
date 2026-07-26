@@ -55,7 +55,11 @@ class PerformanceScreen extends StatelessWidget {
             else
               const _UpdateModuleNote(),
             const SizedBox(height: 26),
-            const SectionHeader(icon: Icons.memory, label: 'CPU'),
+            SectionHeader(
+              icon: Icons.memory,
+              label: 'CPU',
+              trailing: '${state.clusters.length}',
+            ),
             const SizedBox(height: 12),
             Card.outlined(
               child: Column(
@@ -259,12 +263,64 @@ class _ClusterRow extends StatelessWidget {
             color: scheme.onSurfaceVariant, size: 20),
       ),
       title: Text(label),
-      subtitle: Text(
-        '${cluster.coreCount} cores · up to ${formatCpuFreq(cluster.maxHardware)}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${cluster.coreCount} cores · up to ${formatCpuFreq(cluster.maxHardware)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 7),
+          _CapMeter(fraction: cap / cluster.maxHardware, capped: capped),
+        ],
       ),
       trailing: ReelPill(text: formatCpuFreq(cap), highlight: capped),
+    );
+  }
+}
+
+/// How much of the stock ceiling this profile leaves — a bare number ("2.42
+/// GHz") says nothing on its own, the bar shows at a glance that it's about
+/// half. Fills with the same accent the frequency pill uses so the two read as
+/// one reading.
+class _CapMeter extends StatelessWidget {
+  const _CapMeter({required this.fraction, required this.capped});
+
+  final double fraction;
+  final bool capped;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // Tween the fraction itself — a FractionallySizedBox would snap to the new
+    // width, and the bar is the one thing here that should visibly travel when
+    // the profile changes.
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: fraction.clamp(0.0, 1.0)),
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+      builder: (context, t, _) => ClipRRect(
+        borderRadius: BorderRadius.circular(2),
+        child: SizedBox(
+          height: 3,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: ColoredBox(color: scheme.surfaceContainerHighest),
+              ),
+              FractionallySizedBox(
+                widthFactor: t,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  color: capped ? scheme.primary : scheme.tertiary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -288,10 +344,18 @@ class _GpuRow extends StatelessWidget {
             color: scheme.onSurfaceVariant, size: 20),
       ),
       title: const Text('Adreno GPU'),
-      subtitle: Text(
-        'up to ${formatGpuFreq(gpu.stockMax)}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'up to ${formatGpuFreq(gpu.stockMax)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 7),
+          _CapMeter(fraction: cap / gpu.stockMax, capped: capped),
+        ],
       ),
       trailing: ReelPill(text: formatGpuFreq(cap), highlight: capped),
     );

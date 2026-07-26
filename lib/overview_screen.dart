@@ -194,37 +194,25 @@ class OverviewScreen extends StatelessWidget {
                               child: Column(
                                 children: [
                                   if (i > 0) const CardDivider(),
-                                  Builder(
-                                    builder: (rowContext) {
-                                      // Only a recognised Wi-Fi chipset gets the
-                                      // config panel — a loaded non-Wi-Fi USB
-                                      // device (network dongle, storage, etc.)
-                                      // has nothing here to configure, so it
-                                      // just reads "Loaded" with no tap target.
-                                      final iface = devices[i].recognized
-                                          ? matchingIface(
-                                              devices[i], state.interfaces)
-                                          : null;
-                                      return _AdapterRow(
-                                        adapter: devices[i],
-                                        state: state,
-                                        iface: iface,
-                                        busy: devices[i].recognized &&
-                                            controller.moduleBusy.contains(
-                                              devices[i].match!.driver,
-                                            ),
-                                        onLoad: () =>
-                                            _loadAdapter(context, devices[i]),
-                                        onConfigure: iface == null
-                                            ? null
-                                            : () => showAdapterConfigPanel(
-                                                  context,
-                                                  origin: _rowCenter(rowContext),
-                                                  ifaceName: iface.name,
-                                                  controller: controller,
-                                                ),
-                                      );
-                                    },
+                                  // Only a recognised Wi-Fi chipset unfolds its
+                                  // controls — a loaded non-Wi-Fi USB device
+                                  // (network dongle, storage, etc.) has nothing
+                                  // to configure, so it just reads "Loaded"
+                                  // with no tap target.
+                                  _AdapterRow(
+                                    adapter: devices[i],
+                                    state: state,
+                                    iface: devices[i].recognized
+                                        ? matchingIface(
+                                            devices[i], state.interfaces)
+                                        : null,
+                                    controller: controller,
+                                    busy: devices[i].recognized &&
+                                        controller.moduleBusy.contains(
+                                          devices[i].match!.driver,
+                                        ),
+                                    onLoad: () =>
+                                        _loadAdapter(context, devices[i]),
                                   ),
                                 ],
                               ),
@@ -239,15 +227,6 @@ class OverviewScreen extends StatelessWidget {
     );
   }
 
-  /// The row's on-screen centre — the jelly panel grows from here.
-  Offset _rowCenter(BuildContext rowContext) {
-    final box = rowContext.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) {
-      final size = MediaQuery.sizeOf(rowContext);
-      return Offset(size.width / 2, size.height / 2);
-    }
-    return box.localToGlobal(box.size.center(Offset.zero));
-  }
 }
 
 class _WifiHeroCard extends StatelessWidget {
@@ -810,28 +789,47 @@ WifiInterface? matchingIface(DetectedAdapter adapter, List<WifiInterface> interf
   return null;
 }
 
-class _AdapterRow extends StatelessWidget {
+class _AdapterRow extends StatefulWidget {
   const _AdapterRow({
     required this.adapter,
     required this.state,
     required this.iface,
+    required this.controller,
     required this.busy,
     required this.onLoad,
-    required this.onConfigure,
   });
 
   final DetectedAdapter adapter;
   final SystemState state;
 
-  /// The adapter's live netdev, if its driver is loaded and up — tapping the
-  /// row opens its config panel only when this is non-null.
+  /// The adapter's live netdev, if its driver is loaded and up — the row only
+  /// unfolds its controls when this is non-null.
   final WifiInterface? iface;
+  final AppController controller;
   final bool busy;
   final VoidCallback onLoad;
-  final VoidCallback? onConfigure;
+
+  @override
+  State<_AdapterRow> createState() => _AdapterRowState();
+}
+
+class _AdapterRowState extends State<_AdapterRow> {
+  bool _expanded = false;
+
+  @override
+  void didUpdateWidget(_AdapterRow old) {
+    super.didUpdateWidget(old);
+    // Unplugged, or its driver went away: fold back so the next adapter to
+    // take this slot doesn't inherit an open panel.
+    if (widget.iface == null) _expanded = false;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final adapter = widget.adapter;
+    final state = widget.state;
+    final iface = widget.iface;
+    final busy = widget.busy;
     final scheme = Theme.of(context).colorScheme;
     final device = adapter.device;
     final kind = classifyUsb(adapter);
@@ -869,7 +867,7 @@ class _AdapterRow extends StatelessWidget {
     } else if (canLoad) {
       trailing = Jelly(child: FilledButton.tonal(
         key: const ValueKey('idle'),
-        onPressed: onLoad,
+        onPressed: widget.onLoad,
         child: const Text('Load'),
       ));
     } else if (inSystem) {
@@ -918,24 +916,39 @@ class _AdapterRow extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
       trailing: SizedBox(
-        width: 88,
+        width: iface == null ? 88 : 108,
         // Centre both the spinner and the resting controls in the box so the busy
         // spinner morphs into the iface tablet at the same centre — no sideways jump.
-        child: Align(
-          alignment: Alignment.center,
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 280),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            transitionBuilder: (child, animation) => FadeTransition(
-              opacity: animation,
-              child: ScaleTransition(
-                scale: Tween<double>(begin: 0.85, end: 1.0).animate(animation),
-                child: child,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 280),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: ScaleTransition(
+                    scale: Tween<double>(begin: 0.85, end: 1.0).animate(animation),
+                    child: child,
+                  ),
+                ),
+                child: trailing,
               ),
             ),
-            child: trailing,
-          ),
+            // The affordance that the row opens in place rather than going
+            // somewhere — only drawn when there is something to unfold.
+            if (iface != null)
+              AnimatedRotation(
+                turns: _expanded ? 0.5 : 0,
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                child: Icon(Icons.keyboard_arrow_down,
+                    size: 20, color: scheme.onSurfaceVariant),
+              ),
+          ],
         ),
       ),
     );
@@ -944,12 +957,42 @@ class _AdapterRow extends StatelessWidget {
     // as inert rather than a live, tappable adapter.
     final dimmed = notFound ? Opacity(opacity: 0.5, child: tile) : tile;
 
-    // Only a row with somewhere to go (its config panel) gets the jelly
-    // squash-and-tilt — everything else stays a plain, inert row.
-    final onConfigure = this.onConfigure;
-    return onConfigure == null
+    // Only a row with controls to unfold gets the jelly squash — everything
+    // else stays a plain, inert row.
+    final head = iface == null
         ? dimmed
-        : JellyTap(onTap: onConfigure, child: dimmed);
+        : Jelly(
+            pressScale: 0.978,
+            child: InkWell(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() => _expanded = !_expanded);
+              },
+              child: dimmed,
+            ),
+          );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        head,
+        // One height animator for the unfold; the panel itself only fades in,
+        // so nothing nested fights it.
+        AnimatedSize(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: _expanded && iface != null
+              ? AdapterConfigView(
+                  key: ValueKey('cfg-${iface.name}'),
+                  ifaceName: iface.name,
+                  controller: widget.controller,
+                  inline: true,
+                )
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
+    );
   }
 }
 
