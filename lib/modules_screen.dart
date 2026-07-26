@@ -345,7 +345,10 @@ class _ModuleGroup extends StatefulWidget {
   final IconData icon;
   final List<ModuleInfo> modules;
   final AppController controller;
-  final void Function(ModuleInfo, bool) onToggle;
+  /// Returns a future the row awaits before giving up its optimistic position:
+  /// this can end in a confirmation the user declines, in which case nothing
+  /// changes and there is no state update to reconcile against.
+  final Future<void> Function(ModuleInfo, bool) onToggle;
   final void Function(ModuleInfo) onShowError;
   final bool initiallyExpanded;
 
@@ -499,7 +502,7 @@ class _ModuleRow extends StatefulWidget {
   final bool busy;
   final bool hasError;
   final bool? optimisticLoaded;
-  final ValueChanged<bool> onChanged;
+  final Future<void> Function(bool) onChanged;
   final VoidCallback onShowError;
 
   @override
@@ -511,6 +514,7 @@ class _ModuleRowState extends State<_ModuleRow> {
   /// optimistic value: insmod/rmmod goes through `su`, and dispatching it in
   /// the same frame as the press stalls the switch's spring before it's drawn.
   bool? _pending;
+  bool _inFlight = false;
 
   bool get _reported => widget.optimisticLoaded ?? widget.module.loaded;
   bool get _shown => _pending ?? _reported;
@@ -526,12 +530,28 @@ class _ModuleRowState extends State<_ModuleRow> {
     }
   }
 
-  void _toggle() {
+  Future<void> _toggle() async {
+    if (_inFlight) return;
     final target = !_shown;
-    setState(() => _pending = target);
-    Future<void>.delayed(const Duration(milliseconds: 90), () {
-      if (mounted) widget.onChanged(target);
+    setState(() {
+      _pending = target;
+      _inFlight = true;
     });
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      if (!mounted) return;
+      await widget.onChanged(target);
+    } finally {
+      // Reality is authoritative again whatever happened — applied, failed, or
+      // the user declining the "unload dependents?" confirmation, which changes
+      // nothing at all and so would otherwise leave the switch stuck over here.
+      if (mounted) {
+        setState(() {
+          _pending = null;
+          _inFlight = false;
+        });
+      }
+    }
   }
 
   @override

@@ -72,7 +72,7 @@ class _BootLoadCard extends StatelessWidget {
   const _BootLoadCard({required this.enabled, required this.onChanged});
 
   final bool enabled;
-  final ValueChanged<bool> onChanged;
+  final Future<void> Function(bool) onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -94,7 +94,7 @@ class _HidePerfCard extends StatelessWidget {
   const _HidePerfCard({required this.enabled, required this.onChanged});
 
   final bool enabled;
-  final ValueChanged<bool> onChanged;
+  final Future<void> Function(bool) onChanged;
 
   @override
   Widget build(BuildContext context) {

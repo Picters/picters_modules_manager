@@ -794,7 +794,11 @@ class JellySwitchTile extends StatefulWidget {
   final String title;
   final String subtitle;
   final bool value;
-  final ValueChanged<bool>? onChanged;
+
+  /// Awaited before the tile gives up its optimistic position — an action that
+  /// ends in a declined confirmation changes nothing, so there would be no
+  /// state update to reconcile against and the switch would stay stuck.
+  final Future<void> Function(bool)? onChanged;
   final Widget? secondary;
 
   @override
@@ -803,6 +807,7 @@ class JellySwitchTile extends StatefulWidget {
 
 class _JellySwitchTileState extends State<JellySwitchTile> {
   bool? _optimistic;
+  bool _inFlight = false;
 
   @override
   void didUpdateWidget(JellySwitchTile old) {
@@ -814,15 +819,27 @@ class _JellySwitchTileState extends State<JellySwitchTile> {
     }
   }
 
-  void _toggle() {
+  Future<void> _toggle() async {
     final onChanged = widget.onChanged;
-    if (onChanged == null) return;
+    if (onChanged == null || _inFlight) return;
     final target = !(_optimistic ?? widget.value);
-    setState(() => _optimistic = target);
-    // Let the switch's spring get on screen before the root call starts.
-    Future<void>.delayed(const Duration(milliseconds: 90), () {
-      if (mounted) onChanged(target);
+    setState(() {
+      _optimistic = target;
+      _inFlight = true;
     });
+    try {
+      // Let the switch's spring get on screen before the root call starts.
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      if (!mounted) return;
+      await onChanged(target);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _optimistic = null;
+          _inFlight = false;
+        });
+      }
+    }
   }
 
   @override
