@@ -202,7 +202,10 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
       _boSet = true;
     }
     final r = await _iw.setTxPower(iface: widget.ifaceName, dbm: dbm.round());
-    if (mounted && !r.stdout.contains('OK_TXPOWER')) {
+    if (mounted && r.stdout.contains(kTxNoChannel)) {
+      showError(context, 'Bring the interface up on a channel first — '
+          'tx power is saved and applied then.');
+    } else if (mounted && !r.stdout.contains('OK_TXPOWER')) {
       showError(context, 'Could not set tx power.');
     }
     if (iface.driver.isNotEmpty) {

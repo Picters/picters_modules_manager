@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart' show rootBundle;
 
+import 'module_repository.dart' show kBootConfigDir;
 import 'native_bridge.dart';
 import 'root_shell.dart';
 
@@ -87,9 +88,24 @@ String iwSetRegDomainScript(String iwPath, String alpha2, String regDbSrc) =>
     'sleep 1; '
     'echo OK_REG';
 
+/// Marker the tx-power script prints instead of setting anything when the radio
+/// isn't on a channel yet — see [iwSetTxPowerScript].
+const String kTxNoChannel = 'NO_CHANNEL';
+
 /// [dbm] is whole dBm; `iw` wants mBm (hundredths of a dBm).
+///
+/// Guarded on the interface actually being tuned: these Realtek drivers index
+/// their per-channel power table with `current_channel - 1`, which underflows
+/// to 255 and panics the kernel (UBSAN array-bounds) when the channel is still
+/// 0 — the state right after an adapter is plugged in, exactly when we re-apply
+/// a saved value. Nothing is lost by waiting: with no channel there is no power
+/// table to program. The kernel-side fix ships in the OOT driver patches
+/// (ci_core_rs build.rs `patch_realtek_ubsan`); this keeps older builds safe.
 String iwSetTxPowerScript(String iwPath, String iface, int dbm) =>
-    "'$iwPath' dev '$iface' set txpower fixed ${dbm * 100} 2>&1; echo OK_TXPOWER";
+    "if '$iwPath' dev '$iface' info 2>/dev/null | "
+    "grep -qE '^[[:space:]]*channel [0-9]'; then "
+    "'$iwPath' dev '$iface' set txpower fixed ${dbm * 100} 2>&1; "
+    "else echo $kTxNoChannel; fi; echo OK_TXPOWER";
 
 String iwQueryScript(String iwPath, String iface) =>
     "'$iwPath' dev '$iface' info 2>/dev/null; "
@@ -277,34 +293,59 @@ class IwRepository {
   Map<String, Map<String, int>>? _tx;
   String? _txPath;
 
+  /// Mirror of the store in the module's config dir. That dir lives outside
+  /// /data/adb/modules, so it is the one place a Modules-pack update never
+  /// rewrites — the values come back even if the app itself is restaged as a
+  /// system app or has its data cleared.
+  static const String _txBackupPath = '$kBootConfigDir/txpower.json';
+
+  static Map<String, Map<String, int>> _decodeTx(String raw) {
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      return {
+        for (final e in m.entries)
+          e.key: {
+            for (final k in (e.value as Map).entries)
+              k.key as String: (k.value as num).toInt(),
+          },
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
   Future<void> _loadTx() async {
     if (_tx != null) return;
     _tx = {};
     final dir = await NativeBridge.filesDir();
     if (dir == null) return;
     _txPath = '$dir/txpower.json';
+
+    var raw = '';
     try {
       final f = File(_txPath!);
-      if (await f.exists()) {
-        final m = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-        _tx = {
-          for (final e in m.entries)
-            e.key: {
-              for (final k in (e.value as Map).entries)
-                k.key as String: (k.value as num).toInt(),
-            },
-        };
-      }
+      if (await f.exists()) raw = await f.readAsString();
     } catch (_) {}
+    if (raw.trim().isEmpty) {
+      final r = await _shell.run("cat '$_txBackupPath' 2>/dev/null");
+      raw = r.stdout;
+    }
+    _tx = _decodeTx(raw);
   }
 
   Future<void> _saveTx() async {
+    final encoded = jsonEncode(_tx);
     final p = _txPath;
     if (p != null) {
       try {
-        await File(p).writeAsString(jsonEncode(_tx));
+        await File(p).writeAsString(encoded);
       } catch (_) {}
     }
+    // base64 so no byte of the JSON can break out of the root shell command.
+    final b64 = base64Encode(utf8.encode(encoded));
+    await _shell.run(
+      "mkdir -p '$kBootConfigDir' && echo '$b64' | base64 -d > '$_txBackupPath'",
+    );
   }
 
   /// Warm the persisted store into memory so the sync getters below are ready

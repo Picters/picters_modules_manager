@@ -62,6 +62,15 @@ void main() {
       expect(s, contains('set txpower fixed 2400'));
       expect(s, contains('OK_TXPOWER'));
     });
+
+    test('setTxPowerScript only sets power once the iface is on a channel', () {
+      // Setting tx power on an untuned radio panics the Realtek drivers
+      // (channel 0 underflows their per-channel power-table index).
+      final s = iwSetTxPowerScript('/x/iw', 'wlan0', 24);
+      expect(s.indexOf('info'), lessThan(s.indexOf('set txpower')));
+      expect(s, contains('channel [0-9]'));
+      expect(s, contains(kTxNoChannel));
+    });
   });
 
   group('parsing', () {

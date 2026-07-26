@@ -547,10 +547,14 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// Applies [dbm] to [iface]. A freshly plugged adapter usually isn't on a
+  /// channel yet, so the set is skipped (see [iwSetTxPowerScript]); drop the
+  /// "already restored" mark in that case so the next poll tries again.
   Future<void> _restoreTx(String iface, int dbm) async {
     // Tx power only takes with the unrestricted region — set it once, then apply.
     await iw.setRegulatoryDomain(kUnrestrictedRegDomain);
-    await iw.setTxPower(iface: iface, dbm: dbm);
+    final r = await iw.setTxPower(iface: iface, dbm: dbm);
+    if (r.stdout.contains(kTxNoChannel)) _txRestored.remove(iface);
   }
 
   /// Chipset-name text for [iface] (its bound driver plus the matching USB
