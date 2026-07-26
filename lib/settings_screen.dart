@@ -56,6 +56,11 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 26),
+            const SectionHeader(
+                icon: Icons.new_releases_outlined, label: 'Installed build'),
+            const SizedBox(height: 12),
+            _ChangelogCard(controller: controller),
+            const SizedBox(height: 26),
             const SectionHeader(icon: Icons.bug_report, label: 'Debug'),
             const SizedBox(height: 12),
             _DebugCard(controller: controller),
@@ -119,6 +124,112 @@ class _HidePerfCard extends StatelessWidget {
       subtitle: const Text('Removes the Performance tab from the bottom bar.'),
       value: enabled,
       onChanged: onChanged,
+    );
+  }
+}
+
+/// Opens the changelog that shipped inside the installed Modules pack — the
+/// kernel and the pack come out of one build, so it covers both.
+class _ChangelogCard extends StatefulWidget {
+  const _ChangelogCard({required this.controller});
+
+  final SettingsController controller;
+
+  @override
+  State<_ChangelogCard> createState() => _ChangelogCardState();
+}
+
+class _ChangelogCardState extends State<_ChangelogCard> {
+  bool _busy = false;
+
+  Future<void> _open() async {
+    HapticFeedback.selectionClick();
+    setState(() => _busy = true);
+    final log = await widget.controller.installedChangelog();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _ChangelogSheet(version: log.version, text: log.text),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card.outlined(
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        leading: _busy
+            ? SizedBox(
+                width: 24,
+                height: 24,
+                child: MorphingPolygon(size: 24, color: scheme.primary),
+              )
+            : Icon(Icons.history_edu_outlined, color: scheme.onSurfaceVariant),
+        title: const Text("What's new"),
+        subtitle: const Text(
+          'Changelog of the kernel & modules build on this device.',
+        ),
+        trailing: _busy ? null : const Icon(Icons.chevron_right),
+        onTap: _busy ? null : _open,
+      ),
+    );
+  }
+}
+
+class _ChangelogSheet extends StatelessWidget {
+  const _ChangelogSheet({required this.version, required this.text});
+
+  final String version;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final empty = text.isEmpty;
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.75,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("What's new", style: textTheme.titleLarge),
+              if (version.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  version,
+                  style: textTheme.bodySmall
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Text(
+                    empty
+                        ? 'This build predates in-app changelogs, or the '
+                            'Modules pack is not installed. The next update '
+                            'will carry one.'
+                        : text,
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: empty ? scheme.onSurfaceVariant : null,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

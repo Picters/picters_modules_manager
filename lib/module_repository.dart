@@ -616,6 +616,26 @@ class ModuleRepository {
   static const String _modProp =
       '/data/adb/modules/picters-modules-pack/module.prop';
 
+  static const String _modChangelog =
+      '/data/adb/modules/picters-modules-pack/CHANGELOG.md';
+
+  /// The changelog shipped inside the installed Modules pack — what is actually
+  /// running, as opposed to what a pending release advertises. Empty when the
+  /// pack predates changelogs or isn't installed.
+  Future<String> installedChangelog() async {
+    final r = await _shell.run("cat '$_modChangelog' 2>/dev/null");
+    return r.stdout.trim();
+  }
+
+  /// The version string of the installed pack ("6.12.23-…-20260726-1200"), for
+  /// titling the changelog. Empty if not installed.
+  Future<String> installedModulesVersion() async {
+    final r = await _shell.run(
+      "grep '^version=' '$_modProp' 2>/dev/null | head -1 | cut -d= -f2",
+    );
+    return r.stdout.trim();
+  }
+
   /// The versionCode of the currently-installed modules pack (module.prop),
   /// used to gate features on a matching kernel. 0 if not installed/unstamped.
   Future<int> installedModulesVersionCode() async {

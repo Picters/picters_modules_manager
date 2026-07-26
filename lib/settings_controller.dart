@@ -70,6 +70,20 @@ class SettingsController extends ChangeNotifier {
     await _repo.setHidePerformance(value);
   }
 
+  // ── Installed build changelog ────────────────────────────────────────────
+
+  /// Changelog of the kernel/modules build actually installed, plus its version
+  /// label. Read on demand (not at init) — it's only needed when the sheet opens.
+  /// The kernel and the Modules pack come out of the same build, so this one
+  /// document covers both.
+  Future<({String version, String text})> installedChangelog() async {
+    final results = await Future.wait([
+      _repo.installedModulesVersion(),
+      _repo.installedChangelog(),
+    ]);
+    return (version: results[0], text: results[1]);
+  }
+
   // ── Debug log bundle ─────────────────────────────────────────────────────
 
   /// Debug bundle (last_kmsg + dmesg + logcat) for the Settings ▸ Debug block.
