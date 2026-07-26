@@ -485,7 +485,7 @@ IconData _categoryIcon(ModuleCategory cat) => switch (cat) {
       ModuleCategory.other => Icons.extension_outlined,
     };
 
-class _ModuleRow extends StatelessWidget {
+class _ModuleRow extends StatefulWidget {
   const _ModuleRow({
     required this.module,
     required this.busy,
@@ -503,45 +503,79 @@ class _ModuleRow extends StatelessWidget {
   final VoidCallback onShowError;
 
   @override
+  State<_ModuleRow> createState() => _ModuleRowState();
+}
+
+class _ModuleRowState extends State<_ModuleRow> {
+  /// Covers the beat between the tap and the controller publishing its own
+  /// optimistic value: insmod/rmmod goes through `su`, and dispatching it in
+  /// the same frame as the press stalls the switch's spring before it's drawn.
+  bool? _pending;
+
+  bool get _reported => widget.optimisticLoaded ?? widget.module.loaded;
+  bool get _shown => _pending ?? _reported;
+
+  @override
+  void didUpdateWidget(_ModuleRow old) {
+    super.didUpdateWidget(old);
+    final was = old.optimisticLoaded ?? old.module.loaded;
+    // Hand back to the reported value once it agrees — or once it moves at all,
+    // which is how a failed toggle snaps the switch back.
+    if (_pending != null && (_reported == _pending || _reported != was)) {
+      _pending = null;
+    }
+  }
+
+  void _toggle() {
+    final target = !_shown;
+    setState(() => _pending = target);
+    Future<void>.delayed(const Duration(milliseconds: 90), () {
+      if (mounted) widget.onChanged(target);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    // The switch shows the optimistic value and flips the instant it's tapped
-    // (never replaced by a spinner, so toggling stays snappy). While the root
-    // round-trip is in flight the morphing-polygon loader sits just left of the
-    // switch; if the toggle failed, a tappable error icon takes that spot and
-    // opens the dmesg on tap.
-    final loaded = optimisticLoaded ?? module.loaded;
-    final desc = moduleDescription(module.name);
+    // While the root round-trip is in flight the morphing-polygon loader sits
+    // just left of the switch; if the toggle failed, a tappable error icon
+    // takes that spot and opens the dmesg on tap. The switch itself is never
+    // replaced or disabled — same rule as the Settings toggles.
+    final desc = moduleDescription(widget.module.name);
 
-    return ListTile(
-      title: Text(
-        module.name,
-        style: TextStyle(
-          fontWeight: FontWeight.w500,
-          fontFamily: 'monospace',
-          color: scheme.onSurface,
+    return Jelly(
+      pressScale: 0.978,
+      child: ListTile(
+        onTap: _toggle,
+        title: Text(
+          widget.module.name,
+          style: TextStyle(
+            fontWeight: FontWeight.w500,
+            fontFamily: 'monospace',
+            color: scheme.onSurface,
+          ),
         ),
-      ),
-      subtitle: desc == null ? null : Text(desc),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (busy) ...[
-            MorphingPolygon(size: 18, color: scheme.primary),
-            const SizedBox(width: 12),
-          ] else if (hasError) ...[
-            Jelly(child: IconButton(
-              visualDensity: VisualDensity.compact,
-              iconSize: 20,
-              color: scheme.error,
-              icon: const Icon(Icons.error_outline),
-              tooltip: 'Show error',
-              onPressed: onShowError,
-            )),
-            const SizedBox(width: 4),
+        subtitle: desc == null ? null : Text(desc),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.busy) ...[
+              MorphingPolygon(size: 18, color: scheme.primary),
+              const SizedBox(width: 12),
+            ] else if (widget.hasError) ...[
+              Jelly(child: IconButton(
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                color: scheme.error,
+                icon: const Icon(Icons.error_outline),
+                tooltip: 'Show error',
+                onPressed: widget.onShowError,
+              )),
+              const SizedBox(width: 4),
+            ],
+            JellySwitch(value: _shown, onChanged: (_) => _toggle()),
           ],
-          Switch(value: loaded, onChanged: onChanged),
-        ],
+        ),
       ),
     );
   }
