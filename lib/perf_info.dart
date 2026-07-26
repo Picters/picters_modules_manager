@@ -30,8 +30,7 @@ extension PerfProfileX on PerfProfile {
 
   String get blurb => switch (this) {
         PerfProfile.ultraEco =>
-          'For heat, not speed — roughly a third of stock clocks. Made for '
-              'reading, messaging and navigation in direct sun.',
+          'For heat, not speed — about a third of stock clocks.',
         PerfProfile.eco =>
           'Coolest and longest battery — hard caps, prime cores hit hardest.',
         PerfProfile.balanced => 'Cooler but still snappy — trims the top clocks.',

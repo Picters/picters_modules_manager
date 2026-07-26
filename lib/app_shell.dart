@@ -12,7 +12,6 @@ import 'overview_screen.dart';
 import 'performance_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
-import 'update_checker.dart';
 import 'update_controller.dart';
 import 'widgets.dart';
 
@@ -444,17 +443,37 @@ class _RootDenied extends StatelessWidget {
   }
 }
 
-/// Combined "What's new" for the update dialog: the app's release notes plus the
-/// kernel's, if any. Null when there's nothing to show. Drops a leading markdown
-/// "What's Changed" heading so it doesn't echo the section title above it.
-String? _updateNotes(UpdateInfo? app, KernelUpdateInfo? kern) {
-  final parts = <String>[
-    if (app != null && app.notes.trim().isNotEmpty) app.notes.trim(),
-    if (kern != null && kern.notes.trim().isNotEmpty) kern.notes.trim(),
-  ];
-  if (parts.isEmpty) return null;
-  final text = parts
-      .join('\n\n———\n\n')
+/// One labelled changelog block in the update dialog.
+class _NotesSection extends StatelessWidget {
+  const _NotesSection({required this.title, required this.body});
+
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: textTheme.titleSmall),
+        const SizedBox(height: 6),
+        Text(
+          body,
+          style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+/// Tidies one release body for display: drops a leading markdown "What's
+/// Changed" heading so it doesn't echo the section title above it. Null when
+/// there's nothing left to show.
+String? _releaseNotes(String? body) {
+  final text = (body ?? '')
+      .trim()
       .replaceFirst(
           RegExp(r"^#+\s*What.?s Changed\s*", caseSensitive: false), '')
       .trim();
@@ -605,17 +624,33 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
                       ?.copyWith(color: scheme.onSurfaceVariant),
                 ),
               ],
-              if (_updateNotes(app, kern) case final notes?) ...[
+              // App changelog first, kernel changelog under it — each labelled,
+              // so it's obvious which artifact a line belongs to. The kernel
+              // section only exists when a kernel build is actually on offer.
+              if (_releaseNotes(app?.notes) != null ||
+                  _releaseNotes(kern?.notes) != null) ...[
                 const SizedBox(height: 16),
-                Text("What's new", style: textTheme.titleSmall),
-                const SizedBox(height: 6),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 220),
+                  constraints: const BoxConstraints(maxHeight: 260),
                   child: SingleChildScrollView(
-                    child: Text(
-                      notes,
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_releaseNotes(app?.notes) case final notes?)
+                          _NotesSection(
+                            title: "What's new in the app · v${app!.version}",
+                            body: notes,
+                          ),
+                        if (_releaseNotes(kern?.notes) case final notes?) ...[
+                          if (_releaseNotes(app?.notes) != null)
+                            const SizedBox(height: 14),
+                          _NotesSection(
+                            title:
+                                "What's new in the kernel · ${kern!.dateLabel}",
+                            body: notes,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
