@@ -900,11 +900,12 @@ class _JellySwitchTileState extends State<JellySwitchTile> {
   }
 }
 
-/// Gives a sliding tablet a stretch-in-flight jelly reaction whenever [trigger]
-/// changes: it elongates toward the TRAILING edge as it travels — never
-/// smaller than its resting size, no counter-squash — then eases back once it
-/// settles. Pair with a no-overshoot position curve (easeOutCubic) so it never
-/// crosses the wall.
+/// Gives a sliding tablet a "flings, then slams into the wall and squishes"
+/// jelly reaction whenever [trigger] changes. The squash is anchored to the
+/// LEADING (travel-direction) edge, so the tablet compresses *toward* the wall
+/// it arrives at instead of wobbling symmetrically — reads as hitting it. Pair
+/// with a no-overshoot position curve (easeOutCubic) so it never crosses the
+/// wall, only presses into it.
 class JellyStretch extends StatefulWidget {
   const JellyStretch({
     super.key,
@@ -957,16 +958,17 @@ class _JellyStretchState extends State<JellyStretch>
       animation: _c,
       builder: (context, child) {
         final t = _c.value;
-        // One hump, never negative: the tablet only elongates in the travel
-        // direction as it flies, then eases back to its normal size — no
-        // counter-squash on the other axis, no dipping smaller than 1.
-        final env = t >= 1 ? 0.0 : math.sin(t * math.pi) * widget.amount;
+        // Flings out (stretch, trailing edge lags) then, on impact, compresses
+        // toward the wall (squish), springing back — a decaying oscillation.
+        final env = t >= 1
+            ? 0.0
+            : math.sin(t * math.pi * 2) * (1 - t) * (1 - t) * widget.amount;
         final align = widget.horizontal
             ? Alignment(_dir, 0)
             : Alignment(0, _dir);
         return Transform.scale(
-          scaleX: widget.horizontal ? 1 + env : 1,
-          scaleY: widget.horizontal ? 1 : 1 + env,
+          scaleX: widget.horizontal ? 1 + env : 1 - env,
+          scaleY: widget.horizontal ? 1 - env : 1 + env,
           alignment: align,
           child: child,
         );
