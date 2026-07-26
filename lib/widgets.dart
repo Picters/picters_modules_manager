@@ -672,6 +672,21 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>> {
           ),
           child: Stack(
             children: [
+              // A hairline on every internal boundary so each option reads as
+              // its own area. Positioned off the same cellW as the tablet
+              // rather than sat in the label Row — a divider taking part in
+              // that layout would shave the cells and drift them out of step
+              // with the tablet. Drawn under it, so the selected cell is clean.
+              for (var i = 1; i < n; i++)
+                Positioned(
+                  left: cellW * i - 0.5,
+                  top: 8,
+                  bottom: 8,
+                  width: 1,
+                  child: ColoredBox(
+                    color: scheme.onSurface.withValues(alpha: 0.14),
+                  ),
+                ),
               // easeOutCubic stops AT the target (never past the end cell, so it
               // can't cross the wall); the JellyStretch supplies the squish.
               AnimatedPositioned(
