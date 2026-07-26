@@ -871,12 +871,17 @@ class _AdapterRowState extends State<_AdapterRow> {
         child: const Text('Load'),
       ));
     } else if (inSystem) {
-      trailing = _StatusTablet(
-        key: const ValueKey('active'),
-        label: iface?.name ?? (loaded ? 'Loaded' : 'Active'),
-        bg: scheme.tertiaryContainer,
-        fg: scheme.onTertiaryContainer,
-      );
+      // With an interface the chevron alone carries the row: the name is
+      // already the first thing the unfolded panel says, so a tablet repeating
+      // it just crowds the edge.
+      trailing = iface != null
+          ? const SizedBox.shrink(key: ValueKey('iface'))
+          : _StatusTablet(
+              key: const ValueKey('active'),
+              label: loaded ? 'Loaded' : 'Active',
+              bg: scheme.tertiaryContainer,
+              fg: scheme.onTertiaryContainer,
+            );
     } else if (adapter.recognized) {
       // Known Wi-Fi adapter but its .ko isn't staged in the app.
       trailing = _StatusTablet(
@@ -916,7 +921,8 @@ class _AdapterRowState extends State<_AdapterRow> {
         overflow: TextOverflow.ellipsis,
       ),
       trailing: SizedBox(
-        width: iface == null ? 88 : 108,
+        // Just the chevron once there's an interface — no tablet to fit.
+        width: iface == null ? 88 : 28,
         // Centre both the spinner and the resting controls in the box so the busy
         // spinner morphs into the iface tablet at the same centre — no sideways jump.
         child: Row(
@@ -959,11 +965,15 @@ class _AdapterRowState extends State<_AdapterRow> {
 
     // Only a row with controls to unfold gets the jelly squash — everything
     // else stays a plain, inert row.
+    // GestureDetector, not InkWell: the jelly squash is the press feedback, and
+    // a Material ripple washing white over the row on top of it read as a
+    // second, competing effect.
     final head = iface == null
         ? dimmed
         : Jelly(
             pressScale: 0.978,
-            child: InkWell(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: () {
                 HapticFeedback.selectionClick();
                 setState(() => _expanded = !_expanded);

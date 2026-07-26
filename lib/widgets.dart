@@ -706,6 +706,31 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                       borderRadius: BorderRadius.circular(_height / 2),
                     ),
                   ),
+                  // Every slot carries the same tablet, dimmed — so the row
+                  // reads as a set of choices rather than one live button next
+                  // to three bare words. The accent pill slides on top of it.
+                  Padding(
+                    padding: const EdgeInsets.all(_pad),
+                    child: Row(
+                      children: [
+                        for (var i = 0; i < n; i++)
+                          Expanded(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 1.5),
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: scheme.onSurface
+                                      .withValues(alpha: 0.055),
+                                  borderRadius: BorderRadius.circular(
+                                      (_height - _pad * 2) / 2),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                   AnimatedBuilder(
                     animation: _c,
                     builder: (context, _) {

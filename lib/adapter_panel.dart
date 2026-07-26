@@ -70,6 +70,10 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
   /// in station mode while the UI (and airmon-style tooling) reads "monitor",
   /// or the reverse. Re-applying the mode is what puts them back in sync.
   bool get _modeDesync {
+    // Mid-switch the two views are *expected* to disagree — the netdev flips
+    // before cfg80211 is re-read. Claiming a desync there flashed the banner
+    // red on every single mode change.
+    if (_busyMode) return false;
     final t = _iwType;
     final iface = _iface;
     if (t == null || iface == null) return false;
@@ -188,13 +192,16 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
     // Hold the optimistic view until the poll confirms the new mode.
     await _awaitConfirm(() => _iface?.monitor == monitor);
     if (!mounted) return;
+    // Re-read cfg80211's own view BEFORE releasing the busy flag, so the two
+    // readings are already back in agreement by the time the banner is allowed
+    // to draw again.
+    await _load();
+    if (!mounted) return;
     setState(() {
       _busyMode = false;
       _pendingMonitor = null;
       _pendingUp = null;
     });
-    // Re-read cfg80211's own view so the desync banner reflects the new state.
-    await _load();
   }
 
   /// Re-applies [monitor] through the full down/set-type/up sequence even though
@@ -211,8 +218,9 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
     }
     await widget.controller.refresh();
     if (!mounted) return;
-    setState(() => _busyMode = false);
     await _load();
+    if (!mounted) return;
+    setState(() => _busyMode = false);
   }
 
   Future<void> _toggleLink(bool up) async {
@@ -293,6 +301,10 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
     // Resolve the slider value and stock from the in-memory store synchronously
     // (warmed at startup) so the panel opens straight at the saved value — the
     // async _load then just reconciles, no visible jump.
+    // Reconfiguring hands the adapter over to Android's Wi-Fi framework — it
+    // tears the interface down and back up underneath us, so every control
+    // here is locked (and greyed) until it finishes rather than racing it.
+    final reconfiguring = widget.controller.reconfiguring;
     final driver = iface.driver;
     final txSlider = (_txSlider ??
             _iw.lastSetTxSync(driver)?.toDouble() ??
@@ -360,7 +372,7 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
               _SlidingToggle(
                 // Lock both toggles during any action so a mode + link change
                 // can't race and fight each other.
-                busy: _busyMode || _busyLink,
+                busy: _busyMode || _busyLink || reconfiguring,
                 selectedIndex: (_pendingMonitor ?? iface.monitor) ? 1 : 0,
                 labels: const ['Managed', 'Monitor'],
                 icons: const [Icons.wifi, Icons.radar],
@@ -368,7 +380,7 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
               ),
               const SizedBox(height: 8),
               _SlidingToggle(
-                busy: _busyMode || _busyLink,
+                busy: _busyMode || _busyLink || reconfiguring,
                 selectedIndex: (_pendingUp ?? iface.up) ? 0 : 1,
                 labels: const ['Up', 'Down'],
                 icons: const [Icons.power, Icons.power_off],
@@ -410,9 +422,9 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
                           ),
                           const SizedBox(height: 6),
                           IgnorePointer(
-                            ignoring: _busyTx,
+                            ignoring: _busyTx || reconfiguring,
                             child: Opacity(
-                              opacity: _busyTx ? 0.5 : 1,
+                              opacity: _busyTx || reconfiguring ? 0.5 : 1,
                               child: _TxSlider(
                                 value: txSlider,
                                 min: _kMinTxPowerDbm,
@@ -552,7 +564,12 @@ class _SlidingToggle extends StatelessWidget {
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
                           onTap: () => onSelect(i),
-                          child: Row(
+                          // Fill the cell's full height so the whole tablet is
+                          // tappable — a bare Row shrinks to the text and taps
+                          // above or below it fell straight through.
+                          child: SizedBox(
+                            height: double.infinity,
+                            child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
@@ -574,6 +591,7 @@ class _SlidingToggle extends StatelessWidget {
                                 ),
                               ),
                             ],
+                          ),
                           ),
                         ),
                       ),

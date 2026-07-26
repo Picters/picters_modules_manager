@@ -164,45 +164,73 @@ class _ProfileHero extends StatelessWidget {
                         : scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(18),
                   ),
-                  child: Icon(
-                    _profileIcon(profile),
-                    color: capped ? scheme.onPrimary : scheme.onSurfaceVariant,
-                    size: 27,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 320),
+                    child: Icon(
+                      _profileIcon(profile),
+                      key: ValueKey(profile),
+                      color:
+                          capped ? scheme.onPrimary : scheme.onSurfaceVariant,
+                      size: 27,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 16),
+                // Name and blurb ride in together the way the Wi-Fi hero's do
+                // on Overview — the old text swapped instantly under a tablet
+                // that was still sliding.
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              '${profile.label} profile',
-                              style: textTheme.titleMedium?.copyWith(
-                                color: scheme.onSurface,
-                                fontWeight: FontWeight.w700,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 320),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0.06, 0),
+                          end: Offset.zero,
+                        ).animate(animation),
+                        child: child,
+                      ),
+                    ),
+                    layoutBuilder: (currentChild, previousChildren) => Stack(
+                      alignment: Alignment.centerLeft,
+                      children: [...previousChildren, ?currentChild],
+                    ),
+                    child: Column(
+                      key: ValueKey(profile),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                '${profile.label} profile',
+                                style: textTheme.titleMedium?.copyWith(
+                                  color: scheme.onSurface,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                          if (busy) ...[
-                            const SizedBox(width: 10),
-                            MorphingPolygon(size: 17, color: scheme.primary),
+                            if (busy) ...[
+                              const SizedBox(width: 10),
+                              MorphingPolygon(size: 17, color: scheme.primary),
+                            ],
                           ],
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        profile.blurb,
-                        style: textTheme.bodySmall
-                            ?.copyWith(color: scheme.onSurfaceVariant),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          profile.blurb,
+                          style: textTheme.bodySmall
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
