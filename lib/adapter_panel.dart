@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -55,7 +57,15 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
 
   /// The unrestricted region is set once, lazily, on the first tx-power apply —
   /// there's no region UI, it just happens under the hood so the value takes.
+  /// Only latched once the region command actually reports success, so a failed
+  /// attempt is retried instead of being assumed done.
   bool _boSet = false;
+
+  /// A tx power the user asked for that couldn't be programmed yet because the
+  /// radio wasn't on a channel. Re-tried on every scan until it takes — before
+  /// this, the value was silently dropped and the only way out was to nudge the
+  /// slider again once the interface happened to be tuned.
+  int? _pendingTxDbm;
 
   /// The interface type cfg80211 reports, from the last `iw dev info`. The
   /// mode tablet reflects the netdev's ARPHRD type instead; when the two
@@ -120,6 +130,7 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
       Navigator.of(context).maybePop();
       return;
     }
+    if (_pendingTxDbm != null) unawaited(_retryPendingTx());
     setState(() {});
   }
 
@@ -140,9 +151,10 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
     setState(() {
       _iwType = info?.type;
       _stockTxDbm = stock;
-      // Default the slider to the last-set value, else the recommended — never
-      // the live read (it's unreliable and would fight the persisted value).
-      _txSlider ??= (lastSet ?? _profile.recommended)
+      // Default the slider to the last-set value; failing that, to what the
+      // radio actually reports right now, and only then to the recommended one
+      // — opening at 24 while the driver sits at 20 just looked like a lie.
+      _txSlider ??= (lastSet ?? tx?.round() ?? _profile.recommended)
           .toDouble()
           .clamp(_kMinTxPowerDbm, maxDbm);
     });
@@ -233,24 +245,41 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
     final iface = _iface;
     if (iface == null) return;
     setState(() => _busyTx = true);
+    final target = dbm.round();
     // Tx power only takes with the unrestricted region — set it once, silently.
     if (!_boSet) {
-      await _iw.setRegulatoryDomain(kUnrestrictedRegDomain);
-      _boSet = true;
+      final reg = await _iw.setRegulatoryDomain(kUnrestrictedRegDomain);
+      _boSet = reg.stdout.contains('OK_REG');
     }
-    final r = await _iw.setTxPower(iface: widget.ifaceName, dbm: dbm.round());
-    if (mounted && r.stdout.contains(kTxNoChannel)) {
-      showError(context, 'Bring the interface up on a channel first — '
-          'tx power is saved and applied then.');
+    final r = await _iw.setTxPower(iface: widget.ifaceName, dbm: target);
+    final noChannel = r.stdout.contains(kTxNoChannel);
+    _pendingTxDbm = noChannel ? target : null;
+    if (mounted && noChannel) {
+      showInfo(context, 'Saved — it will be applied as soon as the interface '
+          'is up on a channel.');
     } else if (mounted && !r.stdout.contains('OK_TXPOWER')) {
       showError(context, 'Could not set tx power.');
     }
     if (iface.driver.isNotEmpty) {
-      await _iw.recordSetTx(iface.driver, dbm.round()); // remember what we set
+      await _iw.recordSetTx(iface.driver, target); // remember what we set
     }
     await _load();
     if (!mounted) return;
     setState(() => _busyTx = false);
+  }
+
+  /// Retries a tx power that was deferred for want of a channel. Cheap: the
+  /// script checks the channel itself and does nothing until there is one.
+  Future<void> _retryPendingTx() async {
+    final target = _pendingTxDbm;
+    if (target == null || _busyTx) return;
+    _busyTx = true;
+    final r = await _iw.setTxPower(iface: widget.ifaceName, dbm: target);
+    if (!mounted) return;
+    _busyTx = false;
+    if (r.stdout.contains(kTxNoChannel)) return; // still untuned, try again later
+    setState(() => _pendingTxDbm = null);
+    await _load();
   }
 
   @override
@@ -762,10 +791,10 @@ class _ModeDesyncNote extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          TextButton(
+          Jelly(child: TextButton(
             onPressed: busy ? null : onFix,
             child: const Text('Fix'),
-          ),
+          )),
         ],
       ),
     );

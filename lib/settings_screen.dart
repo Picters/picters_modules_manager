@@ -44,7 +44,6 @@ class SettingsScreen extends StatelessWidget {
                 children: [
                   _BootLoadCard(
                     enabled: controller.bootLoadEnabled,
-                    busy: controller.bootLoadBusy,
                     onChanged: _setBootLoad,
                   ),
                   const CardDivider(),
@@ -70,34 +69,22 @@ class SettingsScreen extends StatelessWidget {
 /// non-Wi-Fi module on Android startup. Off by default — nothing loads at boot
 /// until the user opts in here.
 class _BootLoadCard extends StatelessWidget {
-  const _BootLoadCard({
-    required this.enabled,
-    required this.busy,
-    required this.onChanged,
-  });
+  const _BootLoadCard({required this.enabled, required this.onChanged});
 
   final bool enabled;
-  final bool busy;
   final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SwitchListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      secondary: busy
-          ? SizedBox(
-              width: 24,
-              height: 24,
-              child: MorphingPolygon(size: 24, color: scheme.primary),
-            )
-          : Icon(Icons.flash_on, color: scheme.onSurfaceVariant),
-      title: const Text('Load modules on boot'),
-      subtitle: const Text(
-        'Auto-loads every module except Wi-Fi when the device starts.',
-      ),
+    // No busy spinner and no disabling: the switch's own travel is the
+    // feedback, and swapping this icon mid-press is what made it stutter.
+    return JellySwitchTile(
+      secondary: Icon(Icons.flash_on, color: scheme.onSurfaceVariant),
+      title: 'Load modules on boot',
+      subtitle: 'Auto-loads every module except Wi-Fi when the device starts.',
       value: enabled,
-      onChanged: busy ? null : onChanged,
+      onChanged: onChanged,
     );
   }
 }
@@ -112,11 +99,10 @@ class _HidePerfCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SwitchListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    return JellySwitchTile(
       secondary: Icon(Icons.speed_outlined, color: scheme.onSurfaceVariant),
-      title: const Text('Hide Performance screen'),
-      subtitle: const Text('Removes the Performance tab from the bottom bar.'),
+      title: 'Hide Performance screen',
+      subtitle: 'Removes the Performance tab from the bottom bar.',
       value: enabled,
       onChanged: onChanged,
     );
@@ -237,17 +223,17 @@ class _ResultSheet extends StatelessWidget {
                   ?.copyWith(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 20),
-            FilledButton.icon(
+            Jelly(child: FilledButton.icon(
               onPressed: onShare,
               icon: const Icon(Icons.share_outlined),
               label: const Text('Share'),
-            ),
+            )),
             const SizedBox(height: 10),
-            FilledButton.tonalIcon(
+            Jelly(child: FilledButton.tonalIcon(
               onPressed: onSave,
               icon: const Icon(Icons.save_alt),
               label: const Text('Save…'),
-            ),
+            )),
           ],
         ),
       ),

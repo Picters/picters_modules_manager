@@ -36,11 +36,11 @@ void showDiagnosticsDialog(BuildContext context, String dmesgTail) {
         ),
       ),
       actions: [
-        TextButton(
+        Jelly(child: TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Close'),
-        ),
-        FilledButton.tonalIcon(
+        )),
+        Jelly(child: FilledButton.tonalIcon(
           onPressed: () {
             Clipboard.setData(ClipboardData(text: dmesgTail));
             Navigator.of(context).pop();
@@ -48,7 +48,7 @@ void showDiagnosticsDialog(BuildContext context, String dmesgTail) {
           },
           icon: const Icon(Icons.copy, size: 18),
           label: const Text('Copy'),
-        ),
+        )),
       ],
     ),
   );
@@ -70,11 +70,11 @@ Future<bool> confirmAction(
       title: Text(title),
       content: Text(message),
       actions: [
-        TextButton(
+        Jelly(child: TextButton(
           onPressed: () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
-        ),
-        FilledButton(
+        )),
+        Jelly(child: FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
           style: destructive
               ? FilledButton.styleFrom(
@@ -83,7 +83,7 @@ Future<bool> confirmAction(
                 )
               : null,
           child: Text(confirmLabel),
-        ),
+        )),
       ],
     ),
   );
@@ -180,14 +180,14 @@ Future<bool?> _dependencyDialog(
         ],
       ),
       actions: [
-        TextButton(
+        Jelly(child: TextButton(
           onPressed: () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
-        ),
-        FilledButton(
+        )),
+        Jelly(child: FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
           child: Text(confirmLabel),
-        ),
+        )),
       ],
     ),
   );
@@ -264,10 +264,10 @@ Future<WifiInterface?> showInterfacePicker(
         ],
       ),
       actions: [
-        TextButton(
+        Jelly(child: TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
-        ),
+        )),
       ],
     ),
   );
@@ -351,18 +351,105 @@ class _PulsingDotState extends State<PulsingDot> with SingleTickerProviderStateM
   }
 }
 
+/// The spring every jelly reaction releases with. Deliberately underdamped
+/// (ζ ≈ 0.23) so the rebound reads as two or three decaying wobbles rather
+/// than one bounce — that settling is what makes it look like a soft body
+/// instead of a scaled widget.
+const SpringDescription kJellySpring =
+    SpringDescription(mass: 1, stiffness: 380, damping: 9);
+
+/// The one deformation behind every jelly reaction, so a button, a row and a
+/// switch thumb all behave identically.
+///
+/// [p] is the press amount: 1 held, 0 at rest, negative while the release
+/// overshoots. Strictly 2D — it sinks and widens, then springs back and wobbles.
+/// No perspective, no tilt, no shear: the squash-and-stretch alone carries the
+/// softness, and it stays flat.
+///
+/// Returns the (scaleX, scaleY) pair. One axis compresses while the other
+/// bulges by the same amount, so the area stays roughly constant and it reads
+/// as displaced volume rather than as a widget getting smaller.
+({double x, double y}) jellyScale({
+  required double p,
+  required double pressScale,
+}) {
+  final base = 1 - (1 - pressScale) * p;
+  final bulge = p * 0.55 * (1 - pressScale);
+  return (x: base + bulge, y: base - bulge);
+}
+
+/// Drives [jellyTransform] from raw pointer events *without consuming them*, so
+/// it can be wrapped around widgets that handle their own gestures — a
+/// FilledButton, a ListTile, a Switch — and they keep working exactly as
+/// before while gaining the reaction. For a bare tappable with no gesture
+/// handling of its own, use [JellyTap].
+class Jelly extends StatefulWidget {
+  const Jelly({
+    super.key,
+    required this.child,
+    this.pressScale = 0.94,
+    this.enabled = true,
+  });
+
+  final Widget child;
+  final double pressScale;
+  final bool enabled;
+
+  @override
+  State<Jelly> createState() => _JellyState();
+}
+
+class _JellyState extends State<Jelly> with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController.unbounded(vsync: this, value: 0);
+
+  void _down() => _c.animateTo(1,
+      duration: const Duration(milliseconds: 45), curve: Curves.easeOut);
+
+  void _up() =>
+      _c.animateWith(SpringSimulation(kJellySpring, _c.value, 0, _c.velocity));
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled) return widget.child;
+    return Listener(
+      // Listener observes; it never claims the gesture, so the child's own
+      // onTap/onChanged still fires.
+      onPointerDown: (_) => _down(),
+      onPointerUp: (_) => _up(),
+      onPointerCancel: (_) => _up(),
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, child) {
+          final s = jellyScale(
+            p: _c.value.clamp(-0.35, 1.0),
+            pressScale: widget.pressScale,
+          );
+          return Transform.scale(scaleX: s.x, scaleY: s.y, child: child);
+        },
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 /// Wraps a tappable child in a "jelly" reaction: the instant you touch it, it
-/// dips and tilts in 3D *toward the exact point you pressed* (poke the corner →
-/// that corner sinks) and squashes; on release it springs back past its resting
-/// size with a wobble. Replaces the ink ripple. The tilt lands immediately on
-/// press (not after a hold), so even a quick tap reads as jelly.
+/// sinks and widens; on release it springs back past its resting size and
+/// wobbles down. Replaces the ink ripple. The reaction lands immediately on
+/// press (not after a hold), so even a quick tap reads as jelly. This one OWNS
+/// the tap — use [Jelly] to decorate a widget that already handles its own.
 class JellyTap extends StatefulWidget {
   const JellyTap({
     super.key,
     required this.child,
     this.onTap,
-    this.pressScale = 0.92,
-    this.tilt = 0.20,
+    this.pressScale = 0.93,
   });
 
   final Widget child;
@@ -370,9 +457,6 @@ class JellyTap extends StatefulWidget {
 
   /// How far it compresses while held.
   final double pressScale;
-
-  /// Max perspective tilt (radians) toward the press point.
-  final double tilt;
 
   @override
   State<JellyTap> createState() => _JellyTapState();
@@ -384,29 +468,13 @@ class _JellyTapState extends State<JellyTap>
   // below 0 — the wobble past the resting size (the "hit the wall" bounce).
   late final AnimationController _c =
       AnimationController.unbounded(vsync: this, value: 0);
-  static const _spring = SpringDescription(mass: 1, stiffness: 300, damping: 11);
 
-  // Where on the child the press landed, in [-1, 1] from centre.
-  Alignment _at = Alignment.center;
-
-  void _press(TapDownDetails d) {
-    final box = context.findRenderObject() as RenderBox?;
-    final s = box?.size;
-    if (s != null && s.width > 0 && s.height > 0) {
-      _at = Alignment(
-        (d.localPosition.dx / s.width * 2 - 1).clamp(-1.0, 1.0),
-        (d.localPosition.dy / s.height * 2 - 1).clamp(-1.0, 1.0),
-      );
-    } else {
-      _at = Alignment.center;
-    }
-    // Snap to pressed almost instantly so the tilt shows on a quick tap too.
-    _c.animateTo(1,
-        duration: const Duration(milliseconds: 45), curve: Curves.easeOut);
-  }
+  // Snap to pressed almost instantly so it shows on a quick tap too.
+  void _press(TapDownDetails _) => _c.animateTo(1,
+      duration: const Duration(milliseconds: 45), curve: Curves.easeOut);
 
   void _release() =>
-      _c.animateWith(SpringSimulation(_spring, _c.value, 0, _c.velocity));
+      _c.animateWith(SpringSimulation(kJellySpring, _c.value, 0, _c.velocity));
 
   @override
   void dispose() {
@@ -427,22 +495,353 @@ class _JellyTapState extends State<JellyTap>
       child: AnimatedBuilder(
         animation: _c,
         builder: (context, child) {
-          final p = _c.value.clamp(-0.35, 1.0); // <0 = release overshoot
-          final tiltAmt = p.clamp(0.0, 1.0);
-          final base = 1 - (1 - widget.pressScale) * p; // pressed<1, wobble>1
-          final squash = p * 0.5 * (1 - widget.pressScale);
-          final m = Matrix4.identity()
-            ..setEntry(3, 2, 0.0016) // perspective
-            ..rotateX(-_at.y * widget.tilt * tiltAmt)
-            ..rotateY(_at.x * widget.tilt * tiltAmt)
-            ..scaleByDouble(base + squash, base - squash, 1.0, 1.0);
-          return Transform(
-            alignment: Alignment.center,
-            transform: m,
-            child: child,
+          final s = jellyScale(
+            p: _c.value.clamp(-0.35, 1.0),
+            pressScale: widget.pressScale,
           );
+          return Transform.scale(scaleX: s.x, scaleY: s.y, child: child);
         },
         child: widget.child,
+      ),
+    );
+  }
+}
+
+/// The app's switch. The thumb is a blob, not a disc: it stretches along the
+/// direction it's travelling (fast move → longer blob), slams into the far end
+/// and squashes against it, then settles. Pressing it dents it first. The
+/// stretch is derived from the spring's own velocity, so it's the motion that
+/// deforms the shape rather than a canned animation played over it.
+class JellySwitch extends StatefulWidget {
+  const JellySwitch({super.key, required this.value, this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  State<JellySwitch> createState() => _JellySwitchState();
+}
+
+class _JellySwitchState extends State<JellySwitch>
+    with SingleTickerProviderStateMixin {
+  static const _w = 54.0;
+  static const _h = 32.0;
+  static const _thumb = 24.0;
+
+  late final AnimationController _c =
+      AnimationController.unbounded(vsync: this, value: widget.value ? 1 : 0);
+  // Stiffer and better damped than the tap spring: a switch should arrive
+  // decisively, with the wobble in the shape rather than the position.
+  static const _travel = SpringDescription(mass: 1, stiffness: 300, damping: 17);
+
+  bool _held = false;
+
+  @override
+  void didUpdateWidget(JellySwitch old) {
+    super.didUpdateWidget(old);
+    if (old.value != widget.value) {
+      _c.animateWith(
+        SpringSimulation(_travel, _c.value, widget.value ? 1 : 0, _c.velocity),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final enabled = widget.onChanged != null;
+    return Listener(
+      onPointerDown: (_) => setState(() => _held = true),
+      onPointerUp: (_) => setState(() => _held = false),
+      onPointerCancel: (_) => setState(() => _held = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? () => widget.onChanged!(!widget.value) : null,
+        child: SizedBox(
+          width: _w,
+          height: _h,
+          child: AnimatedBuilder(
+            animation: _c,
+            builder: (context, _) {
+              final t = _c.value.clamp(-0.15, 1.15);
+              final on = t.clamp(0.0, 1.0);
+              // Velocity → stretch along travel; held → a symmetrical dent.
+              final v = (_c.velocity / 26).clamp(-1.0, 1.0).abs();
+              final stretch = v * 0.30 + (_held ? 0.10 : 0);
+              final trackOn = Color.lerp(
+                  scheme.surfaceContainerHighest, scheme.primary, on)!;
+              final thumbColor =
+                  Color.lerp(scheme.outline, scheme.onPrimary, on)!;
+              final travel = _w - _thumb - 8;
+              final dx = 4 + travel * t;
+              // Anchor the squash to the leading edge so it presses into the
+              // end it's arriving at.
+              final anchor = _c.velocity >= 0 ? Alignment.centerRight
+                                              : Alignment.centerLeft;
+              return Opacity(
+                opacity: enabled ? 1 : 0.5,
+                child: Stack(
+                  children: [
+                    Container(
+                      width: _w,
+                      height: _h,
+                      decoration: BoxDecoration(
+                        color: trackOn,
+                        borderRadius: BorderRadius.circular(_h / 2),
+                        border: Border.all(
+                          color: on > 0.5
+                              ? Colors.transparent
+                              : scheme.outlineVariant,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: dx,
+                      top: (_h - _thumb) / 2,
+                      child: Transform.scale(
+                        scaleX: 1 + stretch,
+                        scaleY: 1 - stretch * 0.75,
+                        alignment: anchor,
+                        child: Container(
+                          width: _thumb,
+                          height: _thumb,
+                          decoration: BoxDecoration(
+                            color: thumbColor,
+                            borderRadius: BorderRadius.circular(_thumb / 2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A segmented picker with a single sliding pill instead of per-segment
+/// outlines. Material's SegmentedButton gives every option its own border and
+/// its own padding, so four options stop fitting on a phone; here the segments
+/// share one track, split it evenly and never wrap. The pill springs between
+/// them and stretches along the way — the further it travels, the longer it
+/// gets, snapping back once it lands.
+class JellySegmented<T> extends StatefulWidget {
+  const JellySegmented({
+    super.key,
+    required this.values,
+    required this.selected,
+    required this.labelOf,
+    required this.onSelect,
+    this.enabled = true,
+  });
+
+  final List<T> values;
+  final T selected;
+  final String Function(T) labelOf;
+  final ValueChanged<T> onSelect;
+  final bool enabled;
+
+  @override
+  State<JellySegmented<T>> createState() => _JellySegmentedState<T>();
+}
+
+class _JellySegmentedState<T> extends State<JellySegmented<T>>
+    with SingleTickerProviderStateMixin {
+  static const _height = 46.0;
+  static const _pad = 4.0;
+
+  late final AnimationController _c = AnimationController.unbounded(
+    vsync: this,
+    value: widget.values.indexOf(widget.selected).toDouble(),
+  );
+  // Enough overshoot to feel alive, not enough to look loose.
+  static const _slide = SpringDescription(mass: 1, stiffness: 240, damping: 19);
+
+  @override
+  void didUpdateWidget(JellySegmented<T> old) {
+    super.didUpdateWidget(old);
+    final target = widget.values.indexOf(widget.selected).toDouble();
+    if (target >= 0 && target != old.values.indexOf(old.selected).toDouble()) {
+      _c.animateWith(SpringSimulation(_slide, _c.value, target, _c.velocity));
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final n = widget.values.length;
+    return Opacity(
+      opacity: widget.enabled ? 1 : 0.5,
+      child: IgnorePointer(
+        ignoring: !widget.enabled,
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final slot = (box.maxWidth - _pad * 2) / n;
+            return SizedBox(
+              height: _height,
+              child: Stack(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(_height / 2),
+                    ),
+                  ),
+                  AnimatedBuilder(
+                    animation: _c,
+                    builder: (context, _) {
+                      // Speed → length. The pill keeps its centre, so it grows
+                      // out of both ends rather than lurching forward.
+                      final stretch =
+                          (_c.velocity.abs() / 26).clamp(0.0, 0.38);
+                      final w = slot * (1 + stretch);
+                      final centre = _pad + slot * (_c.value + 0.5);
+                      return Positioned(
+                        left: centre - w / 2,
+                        top: _pad,
+                        width: w,
+                        height: _height - _pad * 2,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: scheme.primary,
+                            borderRadius:
+                                BorderRadius.circular((_height - _pad * 2) / 2),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  Row(
+                    children: [
+                      for (final v in widget.values)
+                        Expanded(
+                          child: JellyTap(
+                            pressScale: 0.9,
+                            onTap: () => widget.onSelect(v),
+                            child: SizedBox(
+                              height: _height,
+                              child: Center(
+                                child: AnimatedDefaultTextStyle(
+                                  duration: const Duration(milliseconds: 180),
+                                  style: TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: v == widget.selected
+                                        ? FontWeight.w700
+                                        : FontWeight.w600,
+                                    color: v == widget.selected
+                                        ? scheme.onPrimary
+                                        : scheme.onSurfaceVariant,
+                                  ),
+                                  child: Text(
+                                    widget.labelOf(v),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// A [ListTile] row whose trailing control is a [JellySwitch] and whose whole
+/// row reacts to the press — the drop-in for SwitchListTile.
+///
+/// The switch moves the instant it's tapped and STAYS there: the reported
+/// [value] only catches up once the root command behind it has run, and a
+/// round trip through `su` is slow enough that waiting for it made the toggle
+/// feel broken (no animation, then a jump). So the tile shows its own
+/// optimistic position until reality agrees, and the work is kicked off a frame
+/// later so the spring is already moving before anything can block. Nothing
+/// here disables the row while busy — that was the other half of the jank, the
+/// control going dead and its leading icon swapping mid-press.
+class JellySwitchTile extends StatefulWidget {
+  const JellySwitchTile({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+    this.secondary,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final Widget? secondary;
+
+  @override
+  State<JellySwitchTile> createState() => _JellySwitchTileState();
+}
+
+class _JellySwitchTileState extends State<JellySwitchTile> {
+  bool? _optimistic;
+
+  @override
+  void didUpdateWidget(JellySwitchTile old) {
+    super.didUpdateWidget(old);
+    // Reality caught up (or came back different, e.g. the action failed) —
+    // hand control back to the reported value.
+    if (_optimistic != null && widget.value != old.value) {
+      _optimistic = null;
+    }
+  }
+
+  void _toggle() {
+    final onChanged = widget.onChanged;
+    if (onChanged == null) return;
+    final target = !(_optimistic ?? widget.value);
+    setState(() => _optimistic = target);
+    // Let the switch's spring get on screen before the root call starts.
+    Future<void>.delayed(const Duration(milliseconds: 90), () {
+      if (mounted) onChanged(target);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = _optimistic ?? widget.value;
+    final enabled = widget.onChanged != null;
+    return Jelly(
+      enabled: enabled,
+      pressScale: 0.978,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        leading: widget.secondary,
+        title: Text(widget.title),
+        subtitle: Text(widget.subtitle),
+        trailing: JellySwitch(
+          value: shown,
+          onChanged: enabled ? (_) => _toggle() : null,
+        ),
+        onTap: enabled ? _toggle : null,
       ),
     );
   }

@@ -1,40 +1,50 @@
 import 'package:flutter/material.dart';
 
-/// Fixed brand palette. The app no longer pulls colours from the device
-/// wallpaper (Material You / dynamic_color has been removed): the look is the
-/// same on every device and Android version. A calm blue accent with a teal
-/// tertiary on cool-neutral surfaces; red is reserved for genuine errors.
+/// Fixed brand palette: the calm blue accent with a teal tertiary on
+/// cool-neutral surfaces, pulled down to near-black. Nothing is sampled from
+/// the wallpaper (Material You / dynamic_color is gone) — the look is identical
+/// on every device. Red stays reserved for genuine errors.
+///
+/// The containers are deliberately *tints* rather than mid-dark solids: at this
+/// surface darkness a solid container reads as a smudge, while a low-lit tint
+/// with bright content reads as light coming off the accent.
+
+/// The three faces of the app mark. Fixed literals, not scheme colours — the
+/// logo is the logo whatever the theme does.
+const Color kMarkTop = Color(0xFFFBD08C);
+const Color kMarkLeft = Color(0xFFFBA877);
+const Color kMarkRight = Color(0xFFFB6A5F);
 
 const ColorScheme _darkScheme = ColorScheme(
   brightness: Brightness.dark,
   primary: Color(0xFF8AB4FF),
   onPrimary: Color(0xFF002E6E),
-  primaryContainer: Color(0xFF1F4585),
-  onPrimaryContainer: Color(0xFFD7E3FF),
+  primaryContainer: Color(0xFF16273F),
+  onPrimaryContainer: Color(0xFFBFD5FF),
   secondary: Color(0xFF9FC0FF),
   onSecondary: Color(0xFF002E6E),
-  secondaryContainer: Color(0xFF283C5C),
-  onSecondaryContainer: Color(0xFFD7E3FF),
+  secondaryContainer: Color(0xFF192334),
+  onSecondaryContainer: Color(0xFFC6D9FA),
   tertiary: Color(0xFF7FD0C4),
   onTertiary: Color(0xFF00382F),
-  tertiaryContainer: Color(0xFF1E4E46),
+  tertiaryContainer: Color(0xFF12302B),
   onTertiaryContainer: Color(0xFF9BEDDE),
   error: Color(0xFFFFB4AB),
   onError: Color(0xFF690005),
-  errorContainer: Color(0xFF93000A),
-  onErrorContainer: Color(0xFFFFDAD6),
-  surface: Color(0xFF121316),
+  errorContainer: Color(0xFF3B1512),
+  onErrorContainer: Color(0xFFFFB4AB),
+  surface: Color(0xFF08090B),
   onSurface: Color(0xFFE3E2E6),
-  onSurfaceVariant: Color(0xFFAEB1BA),
-  surfaceContainerLowest: Color(0xFF0D0E11),
-  surfaceContainerLow: Color(0xFF191A1D),
-  surfaceContainer: Color(0xFF1D1E21),
-  surfaceContainerHigh: Color(0xFF27282B),
-  surfaceContainerHighest: Color(0xFF323337),
-  outline: Color(0xFF5D5F66),
-  outlineVariant: Color(0xFF3A3C40),
+  onSurfaceVariant: Color(0xFFA6AAB4),
+  surfaceContainerLowest: Color(0xFF050608),
+  surfaceContainerLow: Color(0xFF0C0D10),
+  surfaceContainer: Color(0xFF111216),
+  surfaceContainerHigh: Color(0xFF17191F),
+  surfaceContainerHighest: Color(0xFF1F2129),
+  outline: Color(0xFF565A63),
+  outlineVariant: Color(0xFF2C2F36),
   inverseSurface: Color(0xFFE3E2E6),
-  onInverseSurface: Color(0xFF1B1B1D),
+  onInverseSurface: Color(0xFF16171A),
   inversePrimary: Color(0xFF2E5FA6),
 );
 
@@ -127,15 +137,27 @@ ThemeData buildAppTheme(Brightness brightness) {
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       height: 72,
-      indicatorColor: scheme.secondaryContainer,
+      // A translucent wash of the accent rather than an opaque pill: on this
+      // surface a solid dark container reads as a smudge, a tint reads as light.
+      indicatorColor: scheme.primary.withValues(alpha: 0.16),
       indicatorShape: stadium,
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          size: 24,
+          color: states.contains(WidgetState.selected)
+              ? scheme.primary
+              : scheme.onSurfaceVariant,
+        ),
+      ),
       labelTextStyle: WidgetStateProperty.resolveWith(
         (states) => TextStyle(
           fontSize: 12,
           fontWeight: states.contains(WidgetState.selected)
               ? FontWeight.w700
               : FontWeight.w500,
-          color: scheme.onSurface,
+          color: states.contains(WidgetState.selected)
+              ? scheme.primary
+              : scheme.onSurfaceVariant,
         ),
       ),
     ),

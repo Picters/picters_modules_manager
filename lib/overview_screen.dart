@@ -61,23 +61,23 @@ class OverviewScreen extends StatelessWidget {
         ),
         actions: [
           if (controller.lastWifiSwitchDiagnostics != null)
-            TextButton(
+            Jelly(child: TextButton(
               onPressed: () {
                 Navigator.of(ctx).pop(false);
                 showDiagnosticsDialog(
                     context, controller.lastWifiSwitchDiagnostics!);
               },
               child: const Text('Details'),
-            ),
-          TextButton(
+            )),
+          Jelly(child: TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Later'),
-          ),
-          FilledButton.icon(
+          )),
+          Jelly(child: FilledButton.icon(
             onPressed: () => Navigator.of(ctx).pop(true),
             icon: const Icon(Icons.restart_alt, size: 18),
             label: const Text('Reboot'),
-          ),
+          )),
         ],
       ),
     );
@@ -451,7 +451,7 @@ class _WifiHeroCard extends StatelessWidget {
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton.icon(
+            child: Jelly(child: OutlinedButton.icon(
               onPressed: reconfiguring ? null : onReconfigure,
               icon: reconfiguring
                   ? MorphingPolygon(size: 18, color: scheme.primary)
@@ -459,7 +459,7 @@ class _WifiHeroCard extends StatelessWidget {
               label: Text(
                 reconfiguring ? 'Reconfiguring…' : 'Reconfigure for Android Wi-Fi',
               ),
-            ),
+            )),
           ),
         ],
       ],
@@ -872,11 +872,11 @@ class _AdapterRow extends StatelessWidget {
         color: scheme.primary,
       );
     } else if (canLoad) {
-      trailing = FilledButton.tonal(
+      trailing = Jelly(child: FilledButton.tonal(
         key: const ValueKey('idle'),
         onPressed: onLoad,
         child: const Text('Load'),
-      );
+      ));
     } else if (inSystem) {
       trailing = _StatusTablet(
         key: const ValueKey('active'),

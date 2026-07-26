@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'app_bottom_bar.dart';
 import 'app_controller.dart';
+import 'brand_mark.dart';
 import 'module_repository.dart';
 import 'modules_screen.dart';
 import 'native_bridge.dart';
@@ -238,11 +239,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           if (_hasUpdate)
             _UpdatePill(onTap: () => _showUpdateDialog(context, _controller.update)),
           if (granted)
-            IconButton(
+            Jelly(child: IconButton(
               icon: const Icon(Icons.add_to_home_screen_outlined),
               tooltip: 'Pin shortcut',
               onPressed: _pinShortcut,
-            ),
+            )),
           const SizedBox(width: 4),
         ],
       ),
@@ -404,22 +405,19 @@ class _RootDenied extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 84,
-              height: 84,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: scheme.errorContainer,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.lock_outline,
-                size: 40,
-                color: scheme.onErrorContainer,
-              ),
+            // The mark carries this screen — it's the first thing anyone sees,
+            // so it's the app introducing itself, with the lock as a badge on
+            // the heading rather than a wall of red.
+            const FloatingBrandMark(size: 104),
+            const SizedBox(height: 26),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.lock_outline, size: 20, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 9),
+                Text('Root required', style: textTheme.headlineSmall),
+              ],
             ),
-            const SizedBox(height: 24),
-            Text('Root required', style: textTheme.headlineSmall),
             const SizedBox(height: 12),
             Text(
               'Grant Superuser access in KernelSU, APatch or Magisk. It ships '
@@ -431,11 +429,11 @@ class _RootDenied extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 28),
-            FilledButton.icon(
+            Jelly(child: FilledButton.icon(
               onPressed: () => NativeBridge.restartApp(),
               icon: const Icon(Icons.restart_alt),
               label: const Text('Restart app'),
-            ),
+            )),
           ],
         ),
       ),
@@ -530,14 +528,14 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
         } else if (phase == UpdatePhase.error) {
           content = Text(controller.combinedUpdateError ?? 'Update failed.');
           actions = [
-            TextButton(
+            Jelly(child: TextButton(
               onPressed: () => Navigator.of(dialogCtx).pop(),
               child: const Text('Close'),
-            ),
-            FilledButton(
+            )),
+            Jelly(child: FilledButton(
               onPressed: () => controller.installAllUpdates(),
               child: const Text('Retry'),
-            ),
+            )),
           ];
         } else if (controller.rebootPending) {
           // Persisted across app restarts until the actual reboot (boot_id).
@@ -554,15 +552,15 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
             ],
           );
           actions = [
-            TextButton(
+            Jelly(child: TextButton(
               onPressed: () => Navigator.of(dialogCtx).pop(),
               child: const Text('Later'),
-            ),
-            FilledButton.icon(
+            )),
+            Jelly(child: FilledButton.icon(
               onPressed: () => controller.rebootForUpdate(),
               icon: const Icon(Icons.restart_alt, size: 18),
               label: const Text('Reboot'),
-            ),
+            )),
           ];
         } else if (phase == UpdatePhase.done) {
           content = Column(
@@ -576,10 +574,10 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
             ],
           );
           actions = [
-            TextButton(
+            Jelly(child: TextButton(
               onPressed: () => Navigator.of(dialogCtx).pop(),
               child: const Text('Done'),
-            ),
+            )),
           ];
         } else {
           content = Column(
@@ -658,15 +656,15 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
             ],
           );
           actions = [
-            TextButton(
+            Jelly(child: TextButton(
               onPressed: () => Navigator.of(dialogCtx).pop(),
               child: const Text('Later'),
-            ),
-            FilledButton.icon(
+            )),
+            Jelly(child: FilledButton.icon(
               onPressed: () => controller.installAllUpdates(),
               icon: const Icon(Icons.bolt, size: 18),
               label: const Text('Install'),
-            ),
+            )),
           ];
         }
 

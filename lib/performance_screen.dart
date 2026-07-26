@@ -86,7 +86,6 @@ class PerformanceScreen extends StatelessWidget {
               const SizedBox(height: 12),
               _PersistCard(
                 enabled: controller.persistOnBoot,
-                busy: controller.busy,
                 onChanged: (v) => _setPersist(context, v),
               ),
             ],
@@ -205,27 +204,12 @@ class _ProfileHero extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 20),
-            IgnorePointer(
-              ignoring: busy,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
-                opacity: busy ? 0.5 : 1.0,
-                child: SizedBox(
-                  width: double.infinity,
-                  child: SegmentedButton<PerfProfile>(
-                    segments: [
-                      for (final p in PerfProfile.values)
-                        ButtonSegment(
-                          value: p,
-                          label: Text(p.shortLabel),
-                        ),
-                    ],
-                    selected: {profile},
-                    showSelectedIcon: false,
-                    onSelectionChanged: (s) => onSelect(s.first),
-                  ),
-                ),
-              ),
+            JellySegmented<PerfProfile>(
+              values: PerfProfile.values,
+              selected: profile,
+              labelOf: (p) => p.shortLabel,
+              onSelect: onSelect,
+              enabled: !busy,
             ),
             if (!hardCaps) ...[
               const SizedBox(height: 12),
@@ -343,33 +327,21 @@ class _FreqTablet extends StatelessWidget {
 }
 
 class _PersistCard extends StatelessWidget {
-  const _PersistCard({
-    required this.enabled,
-    required this.busy,
-    required this.onChanged,
-  });
+  const _PersistCard({required this.enabled, required this.onChanged});
 
   final bool enabled;
-  final bool busy;
   final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Card.outlined(
-      child: SwitchListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        secondary: busy
-            ? SizedBox(
-                width: 24,
-                height: 24,
-                child: MorphingPolygon(size: 24, color: scheme.primary),
-              )
-            : Icon(Icons.save_outlined, color: scheme.onSurfaceVariant),
-        title: const Text('Keep after reboot'),
-        subtitle: const Text('The module re-applies the profile at boot.'),
+      child: JellySwitchTile(
+        secondary: Icon(Icons.save_outlined, color: scheme.onSurfaceVariant),
+        title: 'Keep after reboot',
+        subtitle: 'The module re-applies the profile at boot.',
         value: enabled,
-        onChanged: busy ? null : onChanged,
+        onChanged: onChanged,
       ),
     );
   }

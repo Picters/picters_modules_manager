@@ -305,13 +305,13 @@ class _SearchField extends StatelessWidget {
           valueListenable: controller,
           builder: (context, value, _) => value.text.isEmpty
               ? const SizedBox.shrink()
-              : IconButton(
+              : Jelly(child: IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () {
                     controller.clear();
                     onChanged('');
                   },
-                ),
+                )),
         ),
         filled: true,
         fillColor: scheme.surfaceContainerHighest,
@@ -530,14 +530,14 @@ class _ModuleRow extends StatelessWidget {
             MorphingPolygon(size: 18, color: scheme.primary),
             const SizedBox(width: 12),
           ] else if (hasError) ...[
-            IconButton(
+            Jelly(child: IconButton(
               visualDensity: VisualDensity.compact,
               iconSize: 20,
               color: scheme.error,
               icon: const Icon(Icons.error_outline),
               tooltip: 'Show error',
               onPressed: onShowError,
-            ),
+            )),
             const SizedBox(width: 4),
           ],
           Switch(value: loaded, onChanged: onChanged),
