@@ -201,7 +201,9 @@ ThemeData buildAppTheme(Brightness brightness) {
           TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
         ),
         backgroundColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? scheme.primary : Colors.transparent,
+          (s) => s.contains(WidgetState.selected)
+              ? scheme.primary
+              : Colors.transparent,
         ),
         foregroundColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected)
@@ -218,7 +220,9 @@ ThemeData buildAppTheme(Brightness brightness) {
     ),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith(
-        (s) => s.contains(WidgetState.selected) ? scheme.onPrimary : scheme.outline,
+        (s) => s.contains(WidgetState.selected)
+            ? scheme.onPrimary
+            : scheme.outline,
       ),
       trackColor: WidgetStateProperty.resolveWith(
         (s) => s.contains(WidgetState.selected)
@@ -226,7 +230,9 @@ ThemeData buildAppTheme(Brightness brightness) {
             : scheme.surfaceContainerHighest,
       ),
       trackOutlineColor: WidgetStateProperty.resolveWith(
-        (s) => s.contains(WidgetState.selected) ? Colors.transparent : scheme.outline,
+        (s) => s.contains(WidgetState.selected)
+            ? Colors.transparent
+            : scheme.outline,
       ),
     ),
     dialogTheme: const DialogThemeData(
@@ -236,10 +242,14 @@ ThemeData buildAppTheme(Brightness brightness) {
     ),
     bottomSheetTheme: const BottomSheetThemeData(
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(Corners.sheet)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(Corners.sheet),
+        ),
       ),
     ),
-    dividerTheme: DividerThemeData(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+    dividerTheme: DividerThemeData(
+      color: scheme.outlineVariant.withValues(alpha: 0.5),
+    ),
     snackBarTheme: const SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       insetPadding: EdgeInsets.fromLTRB(16, 5, 16, 12),
@@ -258,10 +268,18 @@ void showInfo(BuildContext context, String message) {
   _showBanner(context, message, isError: false);
 }
 
-void _showBanner(BuildContext context, String message, {required bool isError}) {
+void _showBanner(
+  BuildContext context,
+  String message, {
+  required bool isError,
+}) {
   final scheme = Theme.of(context).colorScheme;
-  final background = isError ? scheme.errorContainer : scheme.secondaryContainer;
-  final foreground = isError ? scheme.onErrorContainer : scheme.onSecondaryContainer;
+  final background = isError
+      ? scheme.errorContainer
+      : scheme.secondaryContainer;
+  final foreground = isError
+      ? scheme.onErrorContainer
+      : scheme.onSecondaryContainer;
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(

@@ -100,11 +100,15 @@ class SystemState {
   String get fingerprint {
     final mods = modules.map((m) => '${m.name}:${m.loaded ? 1 : 0}').join(',');
     final adap = adapters
-        .map((a) =>
-            '${a.device.idPair}:${a.device.driver}:${a.recognized ? a.match!.driver : "?"}')
+        .map(
+          (a) =>
+              '${a.device.idPair}:${a.device.driver}:${a.recognized ? a.match!.driver : "?"}',
+        )
         .join(',');
     final ifs = interfaces
-        .map((i) => '${i.name}:${i.driver}:${i.up ? 1 : 0}:${i.monitor ? 1 : 0}')
+        .map(
+          (i) => '${i.name}:${i.driver}:${i.up ? 1 : 0}:${i.monitor ? 1 : 0}',
+        )
         .join(',');
     return '$wifiMode|$mods|$adap|$ifs|$modulesDirExists';
   }

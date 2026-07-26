@@ -30,7 +30,14 @@ const Map<String, List<String>> kModuleDeps = {
   'ath': ['cfg80211'],
   'ath9k_hw': ['ath'],
   'ath9k_common': ['cfg80211', 'ath9k_hw', 'ath'],
-  'ath9k_htc': ['mac80211', 'ath9k_hw', 'ath', 'ath9k_common', 'cfg80211', 'rfkill'],
+  'ath9k_htc': [
+    'mac80211',
+    'ath9k_hw',
+    'ath',
+    'ath9k_common',
+    'cfg80211',
+    'rfkill',
+  ],
   'ath6kl_core': ['cfg80211'],
   'ath6kl_usb': ['ath6kl_core'],
   'carl9170': ['mac80211', 'ath', 'cfg80211'],
@@ -158,8 +165,9 @@ List<String> loadedDependents({
     return dfs(module);
   }
 
-  final dependents =
-      loaded.where((m) => m != target && dependsOn(m, target)).toSet();
+  final dependents = loaded
+      .where((m) => m != target && dependsOn(m, target))
+      .toSet();
 
   // Peel off, layer by layer, the modules nothing else still-listed depends on
   // — those are safe to rmmod first.
@@ -167,8 +175,12 @@ List<String> loadedDependents({
   final remaining = {...dependents};
   while (remaining.isNotEmpty) {
     final layer = remaining
-        .where((m) => !remaining.any((other) =>
-            other != m && (kModuleDeps[other] ?? const []).contains(m)))
+        .where(
+          (m) => !remaining.any(
+            (other) =>
+                other != m && (kModuleDeps[other] ?? const []).contains(m),
+          ),
+        )
         .toList();
     if (layer.isEmpty) {
       ordered.addAll(remaining); // cycle guard (shouldn't happen)

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'glass.dart';
 import 'widgets.dart';
 
 /// One destination in [AppBottomBar].
@@ -59,12 +60,9 @@ class AppBottomBar extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Material(
-          color: scheme.surfaceContainerHigh,
-          elevation: 3,
-          shadowColor: Colors.black.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(_barRadius),
-          child: Padding(
+          GlassPanel(
+            radius: _barRadius,
+            elevated: true,
             padding: const EdgeInsets.all(_gap),
             child: SizedBox(
               height: _height,
@@ -109,7 +107,6 @@ class AppBottomBar extends StatelessWidget {
               ),
             ),
           ),
-        ),
         ],
       ),
     );
@@ -134,8 +131,9 @@ class _IconCell extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     // Flips instantly — no per-item animation to fall out of sync when taps
     // come fast; the shared tablet carries all the motion.
-    final color =
-        selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant;
+    final color = selected
+        ? scheme.onSecondaryContainer
+        : scheme.onSurfaceVariant;
 
     // GestureDetector, not InkResponse: no white ripple/splash on the dock —
     // the jelly press, the sliding tablet and the haptic tick are the feedback.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'native_bridge.dart';
+import 'glass.dart';
 import 'settings_controller.dart';
 import 'widgets.dart';
 
@@ -39,7 +40,7 @@ class SettingsScreen extends StatelessWidget {
             const SectionHeader(icon: Icons.tune, label: 'General'),
             const SizedBox(height: 12),
             // Both app toggles grouped into one block.
-            Card.outlined(
+            GlassCard(
               child: Column(
                 children: [
                   _BootLoadCard(
@@ -162,14 +163,14 @@ class _DebugCardState extends State<_DebugCard> {
     );
   }
 
-  void _toast(String msg) => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg, textAlign: TextAlign.start)),
-      );
+  void _toast(String msg) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(msg, textAlign: TextAlign.start)));
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card.outlined(
+    return GlassCard(
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         leading: _busy
@@ -189,7 +190,6 @@ class _DebugCardState extends State<_DebugCard> {
     );
   }
 }
-
 
 /// The choice after an archive is built: share it or save it somewhere.
 /// Dismissing the sheet just leaves it (overwritten on the next collect).
@@ -219,21 +219,26 @@ class _ResultSheet extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               fileName,
-              style: textTheme.bodySmall
-                  ?.copyWith(color: scheme.onSurfaceVariant),
+              style: textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 20),
-            Jelly(child: FilledButton.icon(
-              onPressed: onShare,
-              icon: const Icon(Icons.share_outlined),
-              label: const Text('Share'),
-            )),
+            Jelly(
+              child: FilledButton.icon(
+                onPressed: onShare,
+                icon: const Icon(Icons.share_outlined),
+                label: const Text('Share'),
+              ),
+            ),
             const SizedBox(height: 10),
-            Jelly(child: FilledButton.tonalIcon(
-              onPressed: onSave,
-              icon: const Icon(Icons.save_alt),
-              label: const Text('Save…'),
-            )),
+            Jelly(
+              child: FilledButton.tonalIcon(
+                onPressed: onSave,
+                icon: const Icon(Icons.save_alt),
+                label: const Text('Save…'),
+              ),
+            ),
           ],
         ),
       ),

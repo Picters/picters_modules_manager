@@ -14,28 +14,28 @@ enum PerfProfile { ultraEco, eco, balanced, full }
 
 extension PerfProfileX on PerfProfile {
   String get label => switch (this) {
-        PerfProfile.ultraEco => 'Ultra Eco',
-        PerfProfile.eco => 'Eco',
-        PerfProfile.balanced => 'Balanced',
-        PerfProfile.full => 'Full',
-      };
+    PerfProfile.ultraEco => 'Ultra Eco',
+    PerfProfile.eco => 'Eco',
+    PerfProfile.balanced => 'Balanced',
+    PerfProfile.full => 'Full',
+  };
 
   /// Fits four segments across a phone-width selector.
   String get shortLabel => switch (this) {
-        PerfProfile.ultraEco => 'Ultra',
-        PerfProfile.eco => 'Eco',
-        PerfProfile.balanced => 'Balanced',
-        PerfProfile.full => 'Full',
-      };
+    PerfProfile.ultraEco => 'Ultra',
+    PerfProfile.eco => 'Eco',
+    PerfProfile.balanced => 'Balanced',
+    PerfProfile.full => 'Full',
+  };
 
   String get blurb => switch (this) {
-        PerfProfile.ultraEco =>
-          'For heat, not speed — about a third of stock clocks.',
-        PerfProfile.eco =>
-          'Coolest and longest battery — hard caps, prime cores hit hardest.',
-        PerfProfile.balanced => 'Cooler but still snappy — trims the top clocks.',
-        PerfProfile.full => 'Stock clocks — full performance.',
-      };
+    PerfProfile.ultraEco =>
+      'For heat, not speed — about a third of stock clocks.',
+    PerfProfile.eco =>
+      'Coolest and longest battery — hard caps, prime cores hit hardest.',
+    PerfProfile.balanced => 'Cooler but still snappy — trims the top clocks.',
+    PerfProfile.full => 'Stock clocks — full performance.',
+  };
 
   static PerfProfile? fromName(String? name) {
     for (final p in PerfProfile.values) {
@@ -58,20 +58,20 @@ double profileFraction(PerfProfile profile, PerfDomain domain) =>
       // the prime cluster is pulled under the perf cluster's ceiling and the
       // scheduler stops reaching for it under load.
       PerfProfile.ultraEco => switch (domain) {
-          PerfDomain.primeCpu => 0.28,
-          PerfDomain.perfCpu => 0.33,
-          PerfDomain.gpu => 0.30,
-        },
+        PerfDomain.primeCpu => 0.28,
+        PerfDomain.perfCpu => 0.33,
+        PerfDomain.gpu => 0.30,
+      },
       PerfProfile.eco => switch (domain) {
-          PerfDomain.primeCpu => 0.46,
-          PerfDomain.perfCpu => 0.53,
-          PerfDomain.gpu => 0.47,
-        },
+        PerfDomain.primeCpu => 0.46,
+        PerfDomain.perfCpu => 0.53,
+        PerfDomain.gpu => 0.47,
+      },
       PerfProfile.balanced => switch (domain) {
-          PerfDomain.primeCpu => 0.68,
-          PerfDomain.perfCpu => 0.69,
-          PerfDomain.gpu => 0.72,
-        },
+        PerfDomain.primeCpu => 0.68,
+        PerfDomain.perfCpu => 0.69,
+        PerfDomain.gpu => 0.72,
+      },
     };
 
 /// The highest frequency in [available] that is `<= target`, never below the
@@ -205,9 +205,13 @@ class PerfState {
 /// smaller cluster reads as "Prime", the rest as "Performance"/"Efficiency").
 String clusterLabel(CpuCluster c, List<CpuCluster> all) {
   if (all.length <= 1) return 'CPU';
-  final maxOfAll = all.map((e) => e.maxHardware).reduce((a, b) => a > b ? a : b);
+  final maxOfAll = all
+      .map((e) => e.maxHardware)
+      .reduce((a, b) => a > b ? a : b);
   if (c.maxHardware == maxOfAll) return 'Prime cores';
-  final minOfAll = all.map((e) => e.maxHardware).reduce((a, b) => a < b ? a : b);
+  final minOfAll = all
+      .map((e) => e.maxHardware)
+      .reduce((a, b) => a < b ? a : b);
   if (c.maxHardware == minOfAll && all.length >= 3) return 'Efficiency cores';
   return 'Performance cores';
 }
@@ -224,7 +228,9 @@ int? firstCpuOf(CpuCluster c) {
 /// the prime (hit hardest); the rest are perf cores.
 PerfDomain cpuDomain(CpuCluster c, List<CpuCluster> all) {
   if (all.isEmpty) return PerfDomain.perfCpu;
-  final maxOfAll = all.map((e) => e.maxHardware).reduce((a, b) => a > b ? a : b);
+  final maxOfAll = all
+      .map((e) => e.maxHardware)
+      .reduce((a, b) => a > b ? a : b);
   return c.maxHardware == maxOfAll ? PerfDomain.primeCpu : PerfDomain.perfCpu;
 }
 

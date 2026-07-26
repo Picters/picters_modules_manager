@@ -249,9 +249,9 @@ class IwRepository {
     RootRunner runner = const DefaultRootRunner(),
     AssetResolver? resolver,
     AssetResolver? regDbResolver,
-  ])  : _shell = runner,
-        _resolver = resolver ?? _defaultIwResolver,
-        _regDbResolver = regDbResolver ?? _defaultRegDbResolver;
+  ]) : _shell = runner,
+       _resolver = resolver ?? _defaultIwResolver,
+       _regDbResolver = regDbResolver ?? _defaultRegDbResolver;
 
   final RootRunner _shell;
   final AssetResolver _resolver;
@@ -276,7 +276,10 @@ class IwRepository {
     return parseIwQuery(r.stdout);
   }
 
-  Future<ShellResult> setMode({required String iface, required bool monitor}) async {
+  Future<ShellResult> setMode({
+    required String iface,
+    required bool monitor,
+  }) async {
     final iw = await ensureBinary();
     if (iw == null) return const ShellResult(-1, 'iw unavailable');
     return _shell.run(
@@ -292,14 +295,19 @@ class IwRepository {
     final iw = await ensureBinary();
     if (iw == null) return const ShellResult(-1, 'iw unavailable');
     final regDb = await _regDbResolver();
-    if (regDb == null) return const ShellResult(-1, 'regulatory.db unavailable');
+    if (regDb == null) {
+      return const ShellResult(-1, 'regulatory.db unavailable');
+    }
     return _shell.run(
       iwSetRegDomainScript(iw, alpha2, regDb),
       timeout: const Duration(seconds: 15),
     );
   }
 
-  Future<ShellResult> setTxPower({required String iface, required int dbm}) async {
+  Future<ShellResult> setTxPower({
+    required String iface,
+    required int dbm,
+  }) async {
     final iw = await ensureBinary();
     if (iw == null) return const ShellResult(-1, 'iw unavailable');
     return _shell.run(iwSetTxPowerScript(iw, iface, dbm));

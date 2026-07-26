@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'glass.dart';
 import 'perf_controller.dart';
 import 'perf_info.dart';
 import 'theme.dart';
@@ -61,7 +62,7 @@ class PerformanceScreen extends StatelessWidget {
               trailing: '${state.clusters.length}',
             ),
             const SizedBox(height: 12),
-            Card.outlined(
+            GlassCard(
               child: Column(
                 children: [
                   for (var i = 0; i < state.clusters.length; i++) ...[
@@ -79,14 +80,20 @@ class PerformanceScreen extends StatelessWidget {
             if (state.gpu != null) ...[
               const SizedBox(height: 26),
               const SectionHeader(
-                  icon: Icons.videogame_asset_outlined, label: 'GPU'),
+                icon: Icons.videogame_asset_outlined,
+                label: 'GPU',
+              ),
               const SizedBox(height: 12),
-              Card.outlined(
-                  child: _GpuRow(gpu: state.gpu!, profile: controller.profile)),
+              GlassCard(
+                child: _GpuRow(gpu: state.gpu!, profile: controller.profile),
+              ),
             ],
             if (state.bootApplySupported) ...[
               const SizedBox(height: 26),
-              const SectionHeader(icon: Icons.save_outlined, label: 'Persistence'),
+              const SectionHeader(
+                icon: Icons.save_outlined,
+                label: 'Persistence',
+              ),
               const SizedBox(height: 12),
               _PersistCard(
                 enabled: controller.persistOnBoot,
@@ -101,11 +108,11 @@ class PerformanceScreen extends StatelessWidget {
 }
 
 IconData _profileIcon(PerfProfile p) => switch (p) {
-      PerfProfile.ultraEco => Icons.severe_cold,
-      PerfProfile.eco => Icons.ac_unit,
-      PerfProfile.balanced => Icons.balance,
-      PerfProfile.full => Icons.bolt,
-    };
+  PerfProfile.ultraEco => Icons.severe_cold,
+  PerfProfile.eco => Icons.ac_unit,
+  PerfProfile.balanced => Icons.balance,
+  PerfProfile.full => Icons.bolt,
+};
 
 /// The hero card: the active profile's icon + blurb, and the three-way profile
 /// selector underneath.
@@ -130,25 +137,10 @@ class _ProfileHero extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final capped = profile != PerfProfile.full;
     return RepaintBoundary(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 340),
-        curve: Curves.easeOutCubic,
+      child: GlassPanel(
+        radius: Corners.hero,
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: capped
-              ? Color.alphaBlend(
-                  scheme.primary.withValues(alpha: 0.09),
-                  scheme.surfaceContainerHigh,
-                )
-              : scheme.surfaceContainerHigh,
-          border: Border.all(
-            color: capped
-                ? scheme.primary.withValues(alpha: 0.45)
-                : Colors.transparent,
-            width: 1.5,
-          ),
-          borderRadius: BorderRadius.circular(Corners.hero),
-        ),
+        tint: capped ? scheme.primary : null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -169,8 +161,9 @@ class _ProfileHero extends StatelessWidget {
                     child: Icon(
                       _profileIcon(profile),
                       key: ValueKey(profile),
-                      color:
-                          capped ? scheme.onPrimary : scheme.onSurfaceVariant,
+                      color: capped
+                          ? scheme.onPrimary
+                          : scheme.onSurfaceVariant,
                       size: 27,
                     ),
                   ),
@@ -224,8 +217,9 @@ class _ProfileHero extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           profile.blurb,
-                          style: textTheme.bodySmall
-                              ?.copyWith(color: scheme.onSurfaceVariant),
+                          style: textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -248,8 +242,9 @@ class _ProfileHero extends StatelessWidget {
                 'This kernel has no in-kernel ceilings, so the vendor perf '
                 'service keeps raising the clocks back and the module has to '
                 'chase it. Flash the newest kernel for caps that hold.',
-                style: textTheme.bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ],
           ],
@@ -280,15 +275,22 @@ class _ClusterRow extends StatelessWidget {
     // Show the cap this profile sets — not the live scaling_max_freq, which the
     // vendor perf daemon (perfd) constantly rewrites, so it would flicker and
     // read wrong at Full.
-    final cap =
-        cappedMax(profile, domain, cluster.maxHardware, cluster.availableFreqs);
+    final cap = cappedMax(
+      profile,
+      domain,
+      cluster.maxHardware,
+      cluster.availableFreqs,
+    );
     final capped = profile != PerfProfile.full;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: CircleAvatar(
         backgroundColor: scheme.surfaceContainerHighest,
-        child: Icon(Icons.developer_board,
-            color: scheme.onSurfaceVariant, size: 20),
+        child: Icon(
+          Icons.developer_board,
+          color: scheme.onSurfaceVariant,
+          size: 20,
+        ),
       ),
       title: Text(label),
       subtitle: Column(
@@ -362,14 +364,22 @@ class _GpuRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final cap = cappedMax(profile, PerfDomain.gpu, gpu.stockMax, gpu.availableFreqs);
+    final cap = cappedMax(
+      profile,
+      PerfDomain.gpu,
+      gpu.stockMax,
+      gpu.availableFreqs,
+    );
     final capped = profile != PerfProfile.full;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: CircleAvatar(
         backgroundColor: scheme.surfaceContainerHighest,
-        child: Icon(Icons.auto_awesome_motion_outlined,
-            color: scheme.onSurfaceVariant, size: 20),
+        child: Icon(
+          Icons.auto_awesome_motion_outlined,
+          color: scheme.onSurfaceVariant,
+          size: 20,
+        ),
       ),
       title: const Text('Adreno GPU'),
       subtitle: Column(
@@ -399,7 +409,7 @@ class _PersistCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card.outlined(
+    return GlassCard(
       child: JellySwitchTile(
         secondary: Icon(Icons.save_outlined, color: scheme.onSurfaceVariant),
         title: 'Keep after reboot',
@@ -422,7 +432,7 @@ class _UpdateModuleNote extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    return Card.outlined(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Row(
@@ -435,8 +445,11 @@ class _UpdateModuleNote extends StatelessWidget {
                 color: scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(15),
               ),
-              child: Icon(Icons.system_update_alt,
-                  color: scheme.primary, size: 24),
+              child: Icon(
+                Icons.system_update_alt,
+                color: scheme.primary,
+                size: 24,
+              ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -454,8 +467,9 @@ class _UpdateModuleNote extends StatelessWidget {
                   Text(
                     'Performance profiles need the latest kernel & module to '
                     'hold. Flash the newest build to enable them.',
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -479,25 +493,30 @@ class _Unsupported extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
       children: [
         const SizedBox(height: 100),
-        Card.outlined(
+        GlassCard(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
             child: Column(
               children: [
-                Icon(Icons.speed_outlined, size: 48, color: scheme.onSurfaceVariant),
+                Icon(
+                  Icons.speed_outlined,
+                  size: 48,
+                  color: scheme.onSurfaceVariant,
+                ),
                 const SizedBox(height: 16),
-                Text('No CPU controls found',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'No CPU controls found',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 8),
                 Text(
                   "This device doesn't expose cpufreq policies, or root hasn't "
                   'been granted yet.',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: scheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),

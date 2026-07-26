@@ -196,16 +196,22 @@ class UpdateController extends ChangeNotifier {
       if (kern != null) {
         final task = updateTasks.firstWhere((t) => t.isKernel);
         modsFile = await _updates.downloadZip(
-            kern.modulesUrl, '$tmp/${kern.modulesName}', onProgress: (r, t) {
-          task.downloadProgress = t > 0 ? r / t : null;
-          notifyListeners();
-        });
-        if (kern.kernelUrl != null && kern.kernelName != null) {
-          kernFile = await _updates.downloadZip(
-              kern.kernelUrl!, '$tmp/${kern.kernelName}', onProgress: (r, t) {
+          kern.modulesUrl,
+          '$tmp/${kern.modulesName}',
+          onProgress: (r, t) {
             task.downloadProgress = t > 0 ? r / t : null;
             notifyListeners();
-          });
+          },
+        );
+        if (kern.kernelUrl != null && kern.kernelName != null) {
+          kernFile = await _updates.downloadZip(
+            kern.kernelUrl!,
+            '$tmp/${kern.kernelName}',
+            onProgress: (r, t) {
+              task.downloadProgress = t > 0 ? r / t : null;
+              notifyListeners();
+            },
+          );
         }
         task.downloadProgress = 1;
         notifyListeners();
@@ -217,7 +223,9 @@ class UpdateController extends ChangeNotifier {
       if (kern != null && modsFile != null) {
         final res = await _repo.installModuleZip(modsFile.path);
         if (res.stdout.contains('NO_MODULE_MANAGER')) {
-          throw Exception('No KernelSU/Magisk CLI found to install the module.');
+          throw Exception(
+            'No KernelSU/Magisk CLI found to install the module.',
+          );
         }
         if (!res.ok) {
           throw Exception('Module install failed: ${res.errorSummary}');
@@ -225,11 +233,12 @@ class UpdateController extends ChangeNotifier {
         // Flash the boot image (AnyKernel3) to the chosen slot, and keep a copy
         // in Download as a manual-flash fallback.
         if (kernFile != null && kern.kernelName != null) {
-          final inactive = abDevice &&
-              selectedSlot.isNotEmpty &&
-              selectedSlot != activeSlot;
-          final fres =
-              await _repo.flashKernelZip(kernFile.path, inactiveSlot: inactive);
+          final inactive =
+              abDevice && selectedSlot.isNotEmpty && selectedSlot != activeSlot;
+          final fres = await _repo.flashKernelZip(
+            kernFile.path,
+            inactiveSlot: inactive,
+          );
           if (!fres.stdout.contains('AK3_EXIT:0') ||
               fres.stdout.toLowerCase().contains('abort')) {
             throw Exception('Kernel flash failed: ${fres.errorSummary}');
@@ -248,10 +257,13 @@ class UpdateController extends ChangeNotifier {
         updatePhase = UpdatePhase.downloading;
         notifyListeners();
         final task = updateTasks.firstWhere((t) => !t.isKernel);
-        apkFile = await _updates.download(app.apkUrl, onProgress: (r, t) {
-          task.downloadProgress = t > 0 ? r / t : null;
-          notifyListeners();
-        });
+        apkFile = await _updates.download(
+          app.apkUrl,
+          onProgress: (r, t) {
+            task.downloadProgress = t > 0 ? r / t : null;
+            notifyListeners();
+          },
+        );
         task.downloadProgress = 1;
         updatePhase = UpdatePhase.installing;
         notifyListeners();

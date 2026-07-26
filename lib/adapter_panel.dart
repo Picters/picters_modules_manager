@@ -94,7 +94,8 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
   TxPowerProfile get _profile {
     final iface = _iface;
     return txProfileFor(
-        iface == null ? '' : widget.controller.chipTextFor(iface));
+      iface == null ? '' : widget.controller.chipTextFor(iface),
+    );
   }
 
   /// The live interface record, re-read from the controller's own poll on
@@ -141,7 +142,10 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
     // Record stock only from a VALID reading; retrieve the persisted stock
     // (and last-set) regardless — so a bogus -100 read never wipes them.
     if (tx != null && driver.isNotEmpty) {
-      await _iw.recordStockTx(driver, tx.clamp(_kMinTxPowerDbm, maxDbm).round());
+      await _iw.recordStockTx(
+        driver,
+        tx.clamp(_kMinTxPowerDbm, maxDbm).round(),
+      );
     }
     final stock = driver.isEmpty ? null : await _iw.stockTx(driver);
     final lastSet = driver.isEmpty ? null : await _iw.lastSetTx(driver);
@@ -174,7 +178,9 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
     final iface = _iface;
     // Compare against the displayed (commanded-or-live) value so a fast double
     // tap doesn't queue a redundant switch.
-    if (_busyMode || iface == null || (_pendingMonitor ?? iface.monitor) == monitor) {
+    if (_busyMode ||
+        iface == null ||
+        (_pendingMonitor ?? iface.monitor) == monitor) {
       return;
     }
     HapticFeedback.selectionClick();
@@ -233,7 +239,10 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
     });
     final r = await _iw.setLinkUp(iface: widget.ifaceName, up: up);
     if (mounted && !r.stdout.contains('OK_LINK')) {
-      showError(context, "Could not bring the interface ${up ? 'up' : 'down'}.");
+      showError(
+        context,
+        "Could not bring the interface ${up ? 'up' : 'down'}.",
+      );
     }
     await _awaitConfirm(() => _iface?.up == up);
     if (!mounted) return;
@@ -257,8 +266,11 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
     final noChannel = r.stdout.contains(kTxNoChannel);
     _pendingTxDbm = noChannel ? target : null;
     if (mounted && noChannel) {
-      showInfo(context, 'Saved — it will be applied as soon as the interface '
-          'is up on a channel.');
+      showInfo(
+        context,
+        'Saved — it will be applied as soon as the interface '
+        'is up on a channel.',
+      );
     } else if (mounted && !r.stdout.contains('OK_TXPOWER')) {
       showError(context, 'Could not set tx power.');
     }
@@ -279,7 +291,8 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
     final r = await _iw.setTxPower(iface: widget.ifaceName, dbm: target);
     if (!mounted) return;
     _busyTx = false;
-    if (r.stdout.contains(kTxNoChannel)) return; // still untuned, try again later
+    // Still untuned — try again on a later scan.
+    if (r.stdout.contains(kTxNoChannel)) return;
     setState(() => _pendingTxDbm = null);
     await _load();
   }
@@ -306,177 +319,194 @@ class _AdapterConfigViewState extends State<AdapterConfigView> {
     // here is locked (and greyed) until it finishes rather than racing it.
     final reconfiguring = widget.controller.reconfiguring;
     final driver = iface.driver;
-    final txSlider = (_txSlider ??
-            _iw.lastSetTxSync(driver)?.toDouble() ??
-            profile.recommended.toDouble())
-        .clamp(_kMinTxPowerDbm, maxDbm);
+    final txSlider =
+        (_txSlider ??
+                _iw.lastSetTxSync(driver)?.toDouble() ??
+                profile.recommended.toDouble())
+            .clamp(_kMinTxPowerDbm, maxDbm);
     final stock = _stockTxDbm ?? _iw.stockTxSync(driver);
 
     final content = Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(iface.monitor ? Icons.radar : Icons.wifi,
-                      size: 20, color: scheme.primary),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text.rich(
-                      TextSpan(children: [
-                        TextSpan(
-                          text: iface.name,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                          ),
-                        ),
-                        if (iface.driver.isNotEmpty)
-                          TextSpan(
-                            text: '  ·  ${iface.driver}',
-                            style: textTheme.bodySmall
-                                ?.copyWith(color: scheme.onSurfaceVariant),
-                          ),
-                      ]),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (!widget.inline)
-                    JellyTap(
-                      onTap: () => Navigator.of(context).pop(),
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHighest,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(Icons.close,
-                            size: 18, color: scheme.onSurfaceVariant),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              iface.monitor ? Icons.radar : Icons.wifi,
+              size: 20,
+              color: scheme.primary,
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: iface.name,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
                       ),
                     ),
-                ],
-              ),
-              if (_modeDesync) ...[
-                const SizedBox(height: 12),
-                _ModeDesyncNote(
-                  iwType: _iwType!,
-                  busy: _busyMode,
-                  onFix: () => _resyncMode(iface.monitor),
+                    if (iface.driver.isNotEmpty)
+                      TextSpan(
+                        text: '  ·  ${iface.driver}',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-              const SizedBox(height: 14),
-              _SlidingToggle(
-                // Lock both toggles during any action so a mode + link change
-                // can't race and fight each other.
-                busy: _busyMode || _busyLink || reconfiguring,
-                selectedIndex: (_pendingMonitor ?? iface.monitor) ? 1 : 0,
-                labels: const ['Managed', 'Monitor'],
-                icons: const [Icons.wifi, Icons.radar],
-                onSelect: (i) => _toggleMode(i == 1),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 8),
-              _SlidingToggle(
-                busy: _busyMode || _busyLink || reconfiguring,
-                selectedIndex: (_pendingUp ?? iface.up) ? 0 : 1,
-                labels: const ['Up', 'Down'],
-                icons: const [Icons.power, Icons.power_off],
-                onSelect: (i) => _toggleLink(i == 0),
+            ),
+            if (!widget.inline)
+              JellyTap(
+                onTap: () => Navigator.of(context).pop(),
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.close,
+                    size: 18,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
               ),
-              // Tx power lives only in Monitor mode (managed is for normal
-              // Android Wi-Fi use). Just the slider — the region is handled
-              // silently on apply, no region UI.
-              AnimatedSize(
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutCubic,
-                alignment: Alignment.topCenter,
-                child: !iface.monitor
-                    ? const SizedBox(key: ValueKey('no-tx'), width: double.infinity)
-                    : Column(
-                        key: const ValueKey('tx'),
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox(height: 14),
-                          const CardDivider(),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Text('Tx power', style: textTheme.bodyMedium),
-                              const SizedBox(width: 8),
-                              Text(
-                                profile.chip,
-                                style: textTheme.bodySmall?.copyWith(
-                                    color: scheme.onSurfaceVariant),
-                              ),
-                              const Spacer(),
-                              Text(
-                                '${txSlider.round()} dBm',
-                                style: textTheme.bodyMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                            ],
+          ],
+        ),
+        if (_modeDesync) ...[
+          const SizedBox(height: 12),
+          _ModeDesyncNote(
+            iwType: _iwType!,
+            busy: _busyMode,
+            onFix: () => _resyncMode(iface.monitor),
+          ),
+        ],
+        const SizedBox(height: 14),
+        _SlidingToggle(
+          // Lock both toggles during any action so a mode + link change
+          // can't race and fight each other.
+          busy: _busyMode || _busyLink || reconfiguring,
+          selectedIndex: (_pendingMonitor ?? iface.monitor) ? 1 : 0,
+          labels: const ['Managed', 'Monitor'],
+          icons: const [Icons.wifi, Icons.radar],
+          onSelect: (i) => _toggleMode(i == 1),
+        ),
+        const SizedBox(height: 8),
+        _SlidingToggle(
+          busy: _busyMode || _busyLink || reconfiguring,
+          selectedIndex: (_pendingUp ?? iface.up) ? 0 : 1,
+          labels: const ['Up', 'Down'],
+          icons: const [Icons.power, Icons.power_off],
+          onSelect: (i) => _toggleLink(i == 0),
+        ),
+        // Tx power lives only in Monitor mode (managed is for normal
+        // Android Wi-Fi use). Just the slider — the region is handled
+        // silently on apply, no region UI.
+        AnimatedSize(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: !iface.monitor
+              ? const SizedBox(key: ValueKey('no-tx'), width: double.infinity)
+              : Column(
+                  key: const ValueKey('tx'),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 14),
+                    const CardDivider(),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Text('Tx power', style: textTheme.bodyMedium),
+                        const SizedBox(width: 8),
+                        Text(
+                          profile.chip,
+                          style: textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
                           ),
-                          const SizedBox(height: 6),
-                          IgnorePointer(
-                            ignoring: _busyTx || reconfiguring,
-                            child: Opacity(
-                              opacity: _busyTx || reconfiguring ? 0.5 : 1,
-                              child: _TxSlider(
-                                value: txSlider,
-                                min: _kMinTxPowerDbm,
-                                max: maxDbm,
-                                stock: stock?.toDouble(),
-                                recommended: profile.recommended.toDouble(),
-                                warnAt: (profile.danger + 1).toDouble(),
-                                onChanged: (v) => setState(() => _txSlider = v),
-                                onChangeEnd: _applyTxPower,
-                              ),
-                            ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${txSlider.round()} dBm',
+                          style: textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
                           ),
-                          // Past the chip's danger threshold the PA overdrives.
-                          AnimatedSize(
-                            duration: const Duration(milliseconds: 220),
-                            curve: Curves.easeOutCubic,
-                            alignment: Alignment.topCenter,
-                            child: txSlider.round() > profile.danger
-                                ? Padding(
-                                    key: const ValueKey('tx-warn'),
-                                    padding: const EdgeInsets.only(top: 8),
-                                    child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Icon(Icons.warning_amber_rounded,
-                                            size: 16, color: scheme.error),
-                                        const SizedBox(width: 6),
-                                        Expanded(
-                                          child: Text(
-                                            'Past ${profile.danger} dBm the '
-                                            "${profile.chip}'s amplifier "
-                                            'overdrives — the signal gets noisy '
-                                            '(distortion/EVM, splatter into '
-                                            'nearby channels) and range can drop '
-                                            'instead of rise. Recommended: '
-                                            '${profile.recommended} dBm.',
-                                            style: textTheme.bodySmall?.copyWith(
-                                                color: scheme.error),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                : const SizedBox(
-                                    key: ValueKey('tx-nowarn'), width: 0),
-                          ),
-                        ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    IgnorePointer(
+                      ignoring: _busyTx || reconfiguring,
+                      child: Opacity(
+                        opacity: _busyTx || reconfiguring ? 0.5 : 1,
+                        child: _TxSlider(
+                          value: txSlider,
+                          min: _kMinTxPowerDbm,
+                          max: maxDbm,
+                          stock: stock?.toDouble(),
+                          recommended: profile.recommended.toDouble(),
+                          warnAt: (profile.danger + 1).toDouble(),
+                          onChanged: (v) => setState(() => _txSlider = v),
+                          onChangeEnd: _applyTxPower,
+                        ),
                       ),
-              ),
-            ],
-          );
+                    ),
+                    // Past the chip's danger threshold the PA overdrives.
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topCenter,
+                      child: txSlider.round() > profile.danger
+                          ? Padding(
+                              key: const ValueKey('tx-warn'),
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.warning_amber_rounded,
+                                    size: 16,
+                                    color: scheme.error,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Past ${profile.danger} dBm the '
+                                      "${profile.chip}'s amplifier "
+                                      'overdrives — the signal gets noisy '
+                                      '(distortion/EVM, splatter into '
+                                      'nearby channels) and range can drop '
+                                      'instead of rise. Recommended: '
+                                      '${profile.recommended} dBm.',
+                                      style: textTheme.bodySmall?.copyWith(
+                                        color: scheme.error,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : const SizedBox(
+                              key: ValueKey('tx-nowarn'),
+                              width: 0,
+                            ),
+                    ),
+                  ],
+                ),
+        ),
+      ],
+    );
 
     if (widget.inline) {
       return Padding(
@@ -570,28 +600,28 @@ class _SlidingToggle extends StatelessWidget {
                           child: SizedBox(
                             height: double.infinity,
                             child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                icons[i],
-                                size: 16,
-                                color: i == selectedIndex
-                                    ? scheme.onPrimary
-                                    : scheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 7),
-                              Text(
-                                labels[i],
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  icons[i],
+                                  size: 16,
                                   color: i == selectedIndex
                                       ? scheme.onPrimary
                                       : scheme.onSurfaceVariant,
                                 ),
-                              ),
-                            ],
-                          ),
+                                const SizedBox(width: 7),
+                                Text(
+                                  labels[i],
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: i == selectedIndex
+                                        ? scheme.onPrimary
+                                        : scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -711,7 +741,12 @@ class _TxSliderPainter extends CustomPainter {
   final double value, min, max, recommended, pad;
   final double? stock;
   final bool warn;
-  final Color trackColor, activeColor, warnColor, stockColor, ringColor, labelColor;
+  final Color trackColor,
+      activeColor,
+      warnColor,
+      stockColor,
+      ringColor,
+      labelColor;
 
   static const double _trackY = 12;
   static const double _trackH = 5;
@@ -725,11 +760,21 @@ class _TxSliderPainter extends CustomPainter {
 
     // Background + active fill.
     final bg = Paint()..color = trackColor;
-    final rrect = RRect.fromLTRBR(left, _trackY - _trackH / 2, right,
-        _trackY + _trackH / 2, const Radius.circular(_trackH / 2));
+    final rrect = RRect.fromLTRBR(
+      left,
+      _trackY - _trackH / 2,
+      right,
+      _trackY + _trackH / 2,
+      const Radius.circular(_trackH / 2),
+    );
     canvas.drawRRect(rrect, bg);
-    final fillR = RRect.fromLTRBR(left, _trackY - _trackH / 2, xFor(value),
-        _trackY + _trackH / 2, const Radius.circular(_trackH / 2));
+    final fillR = RRect.fromLTRBR(
+      left,
+      _trackY - _trackH / 2,
+      xFor(value),
+      _trackY + _trackH / 2,
+      const Radius.circular(_trackH / 2),
+    );
     canvas.drawRRect(fillR, Paint()..color = active);
 
     // Reference ticks: stock (neutral) and recommended (accent).
@@ -747,7 +792,10 @@ class _TxSliderPainter extends CustomPainter {
         text: TextSpan(
           text: text,
           style: TextStyle(
-              color: color, fontSize: 10.5, fontWeight: FontWeight.w600),
+            color: color,
+            fontSize: 10.5,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
@@ -763,7 +811,11 @@ class _TxSliderPainter extends CustomPainter {
     // Thumb: an accent disc with a ring so it reads on top of the ticks.
     final cx = xFor(value);
     canvas.drawCircle(Offset(cx, _trackY), _thumbR, Paint()..color = ringColor);
-    canvas.drawCircle(Offset(cx, _trackY), _thumbR - 2.5, Paint()..color = active);
+    canvas.drawCircle(
+      Offset(cx, _trackY),
+      _thumbR - 2.5,
+      Paint()..color = active,
+    );
   }
 
   @override
@@ -808,15 +860,19 @@ class _ModeDesyncNote extends StatelessWidget {
             child: Text(
               'The radio reports "$iwType" — another tool changed the mode '
               'halfway. Re-apply it to put them back in sync.',
-              style: textTheme.bodySmall
-                  ?.copyWith(color: scheme.onSurface, height: 1.3),
+              style: textTheme.bodySmall?.copyWith(
+                color: scheme.onSurface,
+                height: 1.3,
+              ),
             ),
           ),
           const SizedBox(width: 6),
-          Jelly(child: TextButton(
-            onPressed: busy ? null : onFix,
-            child: const Text('Fix'),
-          )),
+          Jelly(
+            child: TextButton(
+              onPressed: busy ? null : onFix,
+              child: const Text('Fix'),
+            ),
+          ),
         ],
       ),
     );

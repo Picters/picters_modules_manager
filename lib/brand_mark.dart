@@ -10,7 +10,12 @@ import 'theme.dart';
 /// animated. [lift] tilts the whole solid as if it were being lifted toward the
 /// viewer, which the jelly wrappers drive on press.
 class BrandMark extends StatelessWidget {
-  const BrandMark({super.key, this.size = 28, this.lift = 0, this.shadow = true});
+  const BrandMark({
+    super.key,
+    this.size = 28,
+    this.lift = 0,
+    this.shadow = true,
+  });
 
   final double size;
 

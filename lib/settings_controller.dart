@@ -27,10 +27,7 @@ class SettingsController extends ChangeNotifier {
 
   /// Reads the persisted flags. Called once root is granted.
   Future<void> init() async {
-    await Future.wait([
-      _refreshBootLoadEnabled(),
-      _refreshHidePerformance(),
-    ]);
+    await Future.wait([_refreshBootLoadEnabled(), _refreshHidePerformance()]);
     loaded = true;
     notifyListeners();
   }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'app_bottom_bar.dart';
 import 'app_controller.dart';
 import 'brand_mark.dart';
+import 'glass.dart';
 import 'module_repository.dart';
 import 'modules_screen.dart';
 import 'native_bridge.dart';
@@ -224,138 +225,152 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (!hidePerf) 'Performance',
       'Settings',
     ];
-    return Scaffold(
-      // The floating bar hovers over the content instead of reserving a strip.
-      extendBody: true,
-      appBar: AppBar(
-        title: granted
-            ? ValueListenableBuilder<int>(
-                valueListenable: _tab,
-                builder: (context, tab, _) =>
-                    Text(titles[tab.clamp(0, titles.length - 1)]),
-              )
-            : const Text('Modules Manager'),
-        actions: [
-          if (_hasUpdate)
-            _UpdatePill(onTap: () => _showUpdateDialog(context, _controller.update)),
-          if (granted)
-            Jelly(child: IconButton(
-              icon: const Icon(Icons.add_to_home_screen_outlined),
-              tooltip: 'Pin shortcut',
-              onPressed: _pinShortcut,
-            )),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: switch (_rootStatus) {
-        RootStatus.checking => const _CenterGlyph(
-          icon: Icons.hourglass_empty,
-          title: 'Checking root access…',
-          spinner: true,
+    return GlassBackdrop(
+      child: Scaffold(
+        // Glass refracts what's behind it; a Scaffold painting its own opaque
+        // surface would hide the backdrop entirely.
+        backgroundColor: kLiquidGlass ? Colors.transparent : null,
+        // The floating bar hovers over the content instead of reserving a strip.
+        extendBody: true,
+        appBar: AppBar(
+          backgroundColor: kLiquidGlass ? Colors.transparent : null,
+          title: granted
+              ? ValueListenableBuilder<int>(
+                  valueListenable: _tab,
+                  builder: (context, tab, _) =>
+                      Text(titles[tab.clamp(0, titles.length - 1)]),
+                )
+              : const Text('Modules Manager'),
+          actions: [
+            if (_hasUpdate)
+              _UpdatePill(
+                onTap: () => _showUpdateDialog(context, _controller.update),
+              ),
+            if (granted)
+              Jelly(
+                child: IconButton(
+                  icon: const Icon(Icons.add_to_home_screen_outlined),
+                  tooltip: 'Pin shortcut',
+                  onPressed: _pinShortcut,
+                ),
+              ),
+            const SizedBox(width: 4),
+          ],
         ),
-        RootStatus.denied => _RootDenied(controller: _controller),
-        // Root is in, but hold the neutral loader until the tab flags are read
-        // so the chrome appears once, already in its final shape.
-        RootStatus.granted when !_settingsReady => const _CenterGlyph(
-          icon: Icons.hourglass_empty,
-          title: 'Loading…',
-          spinner: true,
-        ),
-        // Pause the poll while a page scroll is in flight (swipe or tap-driven
-        // animate) — a mid-transition rebuild is what stalled the animation.
-        RootStatus.granted => Column(
-          children: [
-            // Standing notice on hardware this build isn't for — updates are
-            // disabled there (an sm8850 kernel would brick a different device).
-            if (!_deviceSupported) const _UnsupportedDeviceBanner(),
-            // Standing warning strip on a foreign (non-Picters) kernel.
-            if (!_onPictersKernel) const _KernelWarningBanner(),
-            Expanded(
-              child: NotificationListener<ScrollNotification>(
-                onNotification: (n) {
-                  if (n is ScrollStartNotification) {
-                    _controller.setPollPaused(true);
-                  } else if (n is ScrollEndNotification) {
-                    _controller.setPollPaused(false);
-                  }
-                  return false;
-                },
-                child: PageView(
-            controller: _pageController,
-            physics: const _SnappyPagePhysics(),
-            onPageChanged: _onPageChanged,
-            // Each page in its own layer, so a swipe just translates it
-            // instead of repainting both screens every frame. Kept alive so
-            // leaving a tab and coming back preserves its state — expanded
-            // module groups, the search text and the active filter — instead
-            // of rebuilding the screen collapsed from scratch.
+        body: switch (_rootStatus) {
+          RootStatus.checking => const _CenterGlyph(
+            icon: Icons.hourglass_empty,
+            title: 'Checking root access…',
+            spinner: true,
+          ),
+          RootStatus.denied => _RootDenied(controller: _controller),
+          // Root is in, but hold the neutral loader until the tab flags are read
+          // so the chrome appears once, already in its final shape.
+          RootStatus.granted when !_settingsReady => const _CenterGlyph(
+            icon: Icons.hourglass_empty,
+            title: 'Loading…',
+            spinner: true,
+          ),
+          // Pause the poll while a page scroll is in flight (swipe or tap-driven
+          // animate) — a mid-transition rebuild is what stalled the animation.
+          RootStatus.granted => Column(
             children: [
-              _KeepAlive(
-                key: const ValueKey('page-overview'),
-                child: RepaintBoundary(
-                  child: OverviewScreen(controller: _controller),
-                ),
-              ),
-              _KeepAlive(
-                key: const ValueKey('page-modules'),
-                child: RepaintBoundary(
-                  child: ModulesScreen(controller: _controller),
-                ),
-              ),
-              if (!hidePerf)
-                _KeepAlive(
-                  key: const ValueKey('page-performance'),
-                  child: RepaintBoundary(
-                    child: PerformanceScreen(controller: _controller.perf),
+              // Standing notice on hardware this build isn't for — updates are
+              // disabled there (an sm8850 kernel would brick a different device).
+              if (!_deviceSupported) const _UnsupportedDeviceBanner(),
+              // Standing warning strip on a foreign (non-Picters) kernel.
+              if (!_onPictersKernel) const _KernelWarningBanner(),
+              Expanded(
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: (n) {
+                    if (n is ScrollStartNotification) {
+                      _controller.setPollPaused(true);
+                    } else if (n is ScrollEndNotification) {
+                      _controller.setPollPaused(false);
+                    }
+                    return false;
+                  },
+                  child: PageView(
+                    controller: _pageController,
+                    physics: const _SnappyPagePhysics(),
+                    onPageChanged: _onPageChanged,
+                    // Each page in its own layer, so a swipe just translates it
+                    // instead of repainting both screens every frame. Kept alive so
+                    // leaving a tab and coming back preserves its state — expanded
+                    // module groups, the search text and the active filter — instead
+                    // of rebuilding the screen collapsed from scratch.
+                    children: [
+                      _KeepAlive(
+                        key: const ValueKey('page-overview'),
+                        child: RepaintBoundary(
+                          child: OverviewScreen(controller: _controller),
+                        ),
+                      ),
+                      _KeepAlive(
+                        key: const ValueKey('page-modules'),
+                        child: RepaintBoundary(
+                          child: ModulesScreen(controller: _controller),
+                        ),
+                      ),
+                      if (!hidePerf)
+                        _KeepAlive(
+                          key: const ValueKey('page-performance'),
+                          child: RepaintBoundary(
+                            child: PerformanceScreen(
+                              controller: _controller.perf,
+                            ),
+                          ),
+                        ),
+                      _KeepAlive(
+                        key: const ValueKey('page-settings'),
+                        child: RepaintBoundary(
+                          child: SettingsScreen(
+                            controller: _controller.settings,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              _KeepAlive(
-                key: const ValueKey('page-settings'),
-                child: RepaintBoundary(
-                  child: SettingsScreen(controller: _controller.settings),
                 ),
               ),
             ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      },
-      bottomNavigationBar: granted
-          ? RepaintBoundary(
-              child: ValueListenableBuilder<int>(
-                valueListenable: _tab,
-                builder: (context, tab, _) => AppBottomBar(
-                  index: tab,
-                  onSelect: _goToTab,
-                  items: [
-                    const BottomBarItem(
-                      icon: Icons.home_outlined,
-                      selectedIcon: Icons.home,
-                      label: 'Overview',
-                    ),
-                    const BottomBarItem(
-                      icon: Icons.tune_outlined,
-                      selectedIcon: Icons.tune,
-                      label: 'Modules',
-                    ),
-                    if (!hidePerf)
+          ),
+        },
+        bottomNavigationBar: granted
+            ? RepaintBoundary(
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _tab,
+                  builder: (context, tab, _) => AppBottomBar(
+                    index: tab,
+                    onSelect: _goToTab,
+                    items: [
                       const BottomBarItem(
-                        icon: Icons.speed_outlined,
-                        selectedIcon: Icons.speed,
-                        label: 'Performance',
+                        icon: Icons.home_outlined,
+                        selectedIcon: Icons.home,
+                        label: 'Overview',
                       ),
-                    const BottomBarItem(
-                      icon: Icons.settings_outlined,
-                      selectedIcon: Icons.settings,
-                      label: 'Settings',
-                    ),
-                  ],
+                      const BottomBarItem(
+                        icon: Icons.tune_outlined,
+                        selectedIcon: Icons.tune,
+                        label: 'Modules',
+                      ),
+                      if (!hidePerf)
+                        const BottomBarItem(
+                          icon: Icons.speed_outlined,
+                          selectedIcon: Icons.speed,
+                          label: 'Performance',
+                        ),
+                      const BottomBarItem(
+                        icon: Icons.settings_outlined,
+                        selectedIcon: Icons.settings,
+                        label: 'Settings',
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            )
-          : null,
+              )
+            : null,
+      ),
     );
   }
 }
@@ -413,7 +428,11 @@ class _RootDenied extends StatelessWidget {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.lock_outline, size: 20, color: scheme.onSurfaceVariant),
+                Icon(
+                  Icons.lock_outline,
+                  size: 20,
+                  color: scheme.onSurfaceVariant,
+                ),
                 const SizedBox(width: 9),
                 Text('Root required', style: textTheme.headlineSmall),
               ],
@@ -429,11 +448,13 @@ class _RootDenied extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 28),
-            Jelly(child: FilledButton.icon(
-              onPressed: () => NativeBridge.restartApp(),
-              icon: const Icon(Icons.restart_alt),
-              label: const Text('Restart app'),
-            )),
+            Jelly(
+              child: FilledButton.icon(
+                onPressed: () => NativeBridge.restartApp(),
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('Restart app'),
+              ),
+            ),
           ],
         ),
       ),
@@ -473,7 +494,9 @@ String? _releaseNotes(String? body) {
   final text = (body ?? '')
       .trim()
       .replaceFirst(
-          RegExp(r"^#+\s*What.?s Changed\s*", caseSensitive: false), '')
+        RegExp(r"^#+\s*What.?s Changed\s*", caseSensitive: false),
+        '',
+      )
       .trim();
   return text.isEmpty ? null : text;
 }
@@ -528,14 +551,18 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
         } else if (phase == UpdatePhase.error) {
           content = Text(controller.combinedUpdateError ?? 'Update failed.');
           actions = [
-            Jelly(child: TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Close'),
-            )),
-            Jelly(child: FilledButton(
-              onPressed: () => controller.installAllUpdates(),
-              child: const Text('Retry'),
-            )),
+            Jelly(
+              child: TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(),
+                child: const Text('Close'),
+              ),
+            ),
+            Jelly(
+              child: FilledButton(
+                onPressed: () => controller.installAllUpdates(),
+                child: const Text('Retry'),
+              ),
+            ),
           ];
         } else if (controller.rebootPending) {
           // Persisted across app restarts until the actual reboot (boot_id).
@@ -545,22 +572,27 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
             children: [
               for (final t in controller.updateTasks)
                 _TaskLine(label: t.label, done: t.installed),
-              if (controller.updateTasks.isNotEmpty)
-                const SizedBox(height: 12),
-              Text('Installed. Reboot to activate the kernel modules.',
-                  style: textTheme.bodyMedium),
+              if (controller.updateTasks.isNotEmpty) const SizedBox(height: 12),
+              Text(
+                'Installed. Reboot to activate the kernel modules.',
+                style: textTheme.bodyMedium,
+              ),
             ],
           );
           actions = [
-            Jelly(child: TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Later'),
-            )),
-            Jelly(child: FilledButton.icon(
-              onPressed: () => controller.rebootForUpdate(),
-              icon: const Icon(Icons.restart_alt, size: 18),
-              label: const Text('Reboot'),
-            )),
+            Jelly(
+              child: TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(),
+                child: const Text('Later'),
+              ),
+            ),
+            Jelly(
+              child: FilledButton.icon(
+                onPressed: () => controller.rebootForUpdate(),
+                icon: const Icon(Icons.restart_alt, size: 18),
+                label: const Text('Reboot'),
+              ),
+            ),
           ];
         } else if (phase == UpdatePhase.done) {
           content = Column(
@@ -574,27 +606,34 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
             ],
           );
           actions = [
-            Jelly(child: TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Done'),
-            )),
+            Jelly(
+              child: TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(),
+                child: const Text('Done'),
+              ),
+            ),
           ];
         } else {
           content = Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('The following will be downloaded and installed:',
-                  style: textTheme.bodyMedium),
+              Text(
+                'The following will be downloaded and installed:',
+                style: textTheme.bodyMedium,
+              ),
               const SizedBox(height: 10),
               if (kern != null)
                 _TaskLine(label: 'Kernel & modules · ${kern.dateLabel}'),
               if (app != null) _TaskLine(label: 'App · v${app.version}'),
               if (kern != null && controller.abDevice) ...[
                 const SizedBox(height: 14),
-                Text('Flash kernel to slot',
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant)),
+                Text(
+                  'Flash kernel to slot',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
@@ -618,8 +657,9 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
                 Text(
                   'The device will reboot at the end to activate the kernel '
                   'modules.',
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
+                  style: textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
               // App changelog first, kernel changelog under it — each labelled,
@@ -656,15 +696,19 @@ void _showUpdateDialog(BuildContext context, UpdateController controller) {
             ],
           );
           actions = [
-            Jelly(child: TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Later'),
-            )),
-            Jelly(child: FilledButton.icon(
-              onPressed: () => controller.installAllUpdates(),
-              icon: const Icon(Icons.bolt, size: 18),
-              label: const Text('Install'),
-            )),
+            Jelly(
+              child: TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(),
+                child: const Text('Later'),
+              ),
+            ),
+            Jelly(
+              child: FilledButton.icon(
+                onPressed: () => controller.installAllUpdates(),
+                icon: const Icon(Icons.bolt, size: 18),
+                label: const Text('Install'),
+              ),
+            ),
           ];
         }
 
@@ -730,15 +774,19 @@ class _TaskProgress extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: Text(task.label,
-                  style: Theme.of(context).textTheme.bodySmall,
-                  overflow: TextOverflow.ellipsis),
+              child: Text(
+                task.label,
+                style: Theme.of(context).textTheme.bodySmall,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             if (done)
               Icon(Icons.check_circle, size: 15, color: scheme.primary)
             else if (!installing && task.downloadProgress != null)
-              Text('${(task.downloadProgress! * 100).round()}%',
-                  style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                '${(task.downloadProgress! * 100).round()}%',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
           ],
         ),
         const SizedBox(height: 5),
@@ -794,7 +842,9 @@ class _UpdatePillState extends State<_UpdatePill>
           builder: (context, child) {
             final pulse = Curves.easeInOut.transform(_c.value);
             final entered = Curves.easeOutBack.transform(_entry.value);
-            final opacity = Curves.easeOut.transform(_entry.value).clamp(0.0, 1.0);
+            final opacity = Curves.easeOut
+                .transform(_entry.value)
+                .clamp(0.0, 1.0);
             final scale = (0.7 + 0.3 * entered) * (1 + 0.04 * pulse);
             return Opacity(
               opacity: opacity,
@@ -860,17 +910,20 @@ class _KernelWarningBanner extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             children: [
-              Icon(Icons.warning_amber_rounded,
-                  size: 20, color: scheme.onErrorContainer),
+              Icon(
+                Icons.warning_amber_rounded,
+                size: 20,
+                color: scheme.onErrorContainer,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Not running the Picters kernel — Wi-Fi injection and the '
                   'bundled modules may not work.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onErrorContainer,
-                        fontWeight: FontWeight.w500,
-                      ),
+                    color: scheme.onErrorContainer,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ],
@@ -906,9 +959,9 @@ class _UnsupportedDeviceBanner extends StatelessWidget {
                   'Unsupported device — updates are disabled. This build is only '
                   'for the Xiaomi 17 series (sm8850).',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onErrorContainer,
-                        fontWeight: FontWeight.w500,
-                      ),
+                    color: scheme.onErrorContainer,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ],

@@ -44,7 +44,11 @@ class KernelUpdateInfo {
 }
 
 class UpdateInfo {
-  const UpdateInfo({required this.version, required this.apkUrl, required this.notes});
+  const UpdateInfo({
+    required this.version,
+    required this.apkUrl,
+    required this.notes,
+  });
 
   final String version;
   final String apkUrl;
@@ -61,7 +65,11 @@ class UpdateChecker {
     try {
       final info = await PackageInfo.fromPlatform();
       final req = await client
-          .getUrl(Uri.parse('https://api.github.com/repos/$kUpdateRepo/releases/latest'))
+          .getUrl(
+            Uri.parse(
+              'https://api.github.com/repos/$kUpdateRepo/releases/latest',
+            ),
+          )
           .timeout(const Duration(seconds: 10));
       req.headers.set('Accept', 'application/vnd.github+json');
       req.headers.set('User-Agent', 'PictersModulesManager');
@@ -72,7 +80,8 @@ class UpdateChecker {
 
       final tag = (json['tag_name'] as String? ?? '').trim();
       final remoteVersion = tag.startsWith('v') ? tag.substring(1) : tag;
-      if (remoteVersion.isEmpty || !isNewerVersion(remoteVersion, info.version)) {
+      if (remoteVersion.isEmpty ||
+          !isNewerVersion(remoteVersion, info.version)) {
         return null;
       }
 
@@ -106,8 +115,11 @@ class UpdateChecker {
     final client = HttpClient();
     try {
       final req = await client
-          .getUrl(Uri.parse(
-              'https://api.github.com/repos/$kKernelRepo/releases?per_page=15'))
+          .getUrl(
+            Uri.parse(
+              'https://api.github.com/repos/$kKernelRepo/releases?per_page=15',
+            ),
+          )
           .timeout(const Duration(seconds: 10));
       req.headers.set('Accept', 'application/vnd.github+json');
       req.headers.set('User-Agent', 'PictersModulesManager');
@@ -166,8 +178,11 @@ class UpdateChecker {
 
   /// Downloads a release zip to [destPath], retrying transient failures and
   /// checking it's a real (PK-magic) zip of the declared size before returning.
-  Future<File> downloadZip(String url, String destPath,
-      {void Function(int received, int total)? onProgress}) async {
+  Future<File> downloadZip(
+    String url,
+    String destPath, {
+    void Function(int received, int total)? onProgress,
+  }) async {
     final file = File(destPath);
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
@@ -212,8 +227,10 @@ class UpdateChecker {
 
   /// Downloads the release APK into the app's cache dir, retrying on
   /// transient failures and validating the result before handing it back.
-  Future<File> download(String url,
-      {void Function(int received, int total)? onProgress}) async {
+  Future<File> download(
+    String url, {
+    void Function(int received, int total)? onProgress,
+  }) async {
     final file = File('${Directory.systemTemp.path}/pmm_update.apk');
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
-import 'package:flutter/cupertino.dart' show CupertinoSliverRefreshControl, RefreshIndicatorMode;
+import 'package:flutter/cupertino.dart'
+    show CupertinoSliverRefreshControl, RefreshIndicatorMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -30,25 +31,33 @@ void showDiagnosticsDialog(BuildContext context, String dmesgTail) {
             ),
             child: SelectableText(
               dmesgTail.isEmpty ? '(no matching dmesg lines)' : dmesgTail,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5, height: 1.4),
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12.5,
+                height: 1.4,
+              ),
             ),
           ),
         ),
       ),
       actions: [
-        Jelly(child: TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Close'),
-        )),
-        Jelly(child: FilledButton.tonalIcon(
-          onPressed: () {
-            Clipboard.setData(ClipboardData(text: dmesgTail));
-            Navigator.of(context).pop();
-            showInfo(context, 'Diagnostics copied to clipboard.');
-          },
-          icon: const Icon(Icons.copy, size: 18),
-          label: const Text('Copy'),
-        )),
+        Jelly(
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ),
+        Jelly(
+          child: FilledButton.tonalIcon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: dmesgTail));
+              Navigator.of(context).pop();
+              showInfo(context, 'Diagnostics copied to clipboard.');
+            },
+            icon: const Icon(Icons.copy, size: 18),
+            label: const Text('Copy'),
+          ),
+        ),
       ],
     ),
   );
@@ -70,20 +79,24 @@ Future<bool> confirmAction(
       title: Text(title),
       content: Text(message),
       actions: [
-        Jelly(child: TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
-        )),
-        Jelly(child: FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          style: destructive
-              ? FilledButton.styleFrom(
-                  backgroundColor: scheme.error,
-                  foregroundColor: scheme.onError,
-                )
-              : null,
-          child: Text(confirmLabel),
-        )),
+        Jelly(
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+        ),
+        Jelly(
+          child: FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: destructive
+                ? FilledButton.styleFrom(
+                    backgroundColor: scheme.error,
+                    foregroundColor: scheme.onError,
+                  )
+                : null,
+            child: Text(confirmLabel),
+          ),
+        ),
       ],
     ),
   );
@@ -156,7 +169,10 @@ Future<bool?> _dependencyDialog(
             children: [
               for (final m in modules)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
                   decoration: BoxDecoration(
                     color: scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(12),
@@ -175,19 +191,25 @@ Future<bool?> _dependencyDialog(
           const SizedBox(height: 16),
           Text(
             note,
-            style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            style: textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
       actions: [
-        Jelly(child: TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
-        )),
-        Jelly(child: FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(confirmLabel),
-        )),
+        Jelly(
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+        ),
+        Jelly(
+          child: FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(confirmLabel),
+          ),
+        ),
       ],
     ),
   );
@@ -221,8 +243,10 @@ Future<WifiInterface?> showInterfacePicker(
                 child: InkWell(
                   onTap: () => Navigator.of(context).pop(i),
                   child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                     child: Row(
                       children: [
                         Icon(
@@ -248,13 +272,17 @@ Future<WifiInterface?> showInterfacePicker(
                                 '${i.driver.isEmpty ? "no driver" : i.driver} · '
                                 '${i.monitor ? "monitor" : "managed"} · '
                                 '${i.up ? "up" : "down"}',
-                                style: textTheme.bodySmall
-                                    ?.copyWith(color: scheme.onSurfaceVariant),
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
                               ),
                             ],
                           ),
                         ),
-                        Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+                        Icon(
+                          Icons.chevron_right,
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ],
                     ),
                   ),
@@ -264,10 +292,12 @@ Future<WifiInterface?> showInterfacePicker(
         ],
       ),
       actions: [
-        Jelly(child: TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        )),
+        Jelly(
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ),
       ],
     ),
   );
@@ -284,7 +314,8 @@ class PulsingDot extends StatefulWidget {
   State<PulsingDot> createState() => _PulsingDotState();
 }
 
-class _PulsingDotState extends State<PulsingDot> with SingleTickerProviderStateMixin {
+class _PulsingDotState extends State<PulsingDot>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1100),
@@ -300,8 +331,10 @@ class _PulsingDotState extends State<PulsingDot> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     return RepaintBoundary(
       child: FadeTransition(
-        opacity: Tween(begin: 0.35, end: 1.0)
-            .animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
+        opacity: Tween(
+          begin: 0.35,
+          end: 1.0,
+        ).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
         child: Container(
           width: widget.size,
           height: widget.size,
@@ -309,7 +342,10 @@ class _PulsingDotState extends State<PulsingDot> with SingleTickerProviderStateM
             color: widget.color,
             shape: BoxShape.circle,
             boxShadow: [
-              BoxShadow(color: widget.color.withValues(alpha: 0.6), blurRadius: 6),
+              BoxShadow(
+                color: widget.color.withValues(alpha: 0.6),
+                blurRadius: 6,
+              ),
             ],
           ),
         ),
@@ -322,8 +358,11 @@ class _PulsingDotState extends State<PulsingDot> with SingleTickerProviderStateM
 /// (ζ ≈ 0.23) so the rebound reads as two or three decaying wobbles rather
 /// than one bounce — that settling is what makes it look like a soft body
 /// instead of a scaled widget.
-const SpringDescription kJellySpring =
-    SpringDescription(mass: 1, stiffness: 380, damping: 9);
+const SpringDescription kJellySpring = SpringDescription(
+  mass: 1,
+  stiffness: 380,
+  damping: 9,
+);
 
 /// The one deformation behind every jelly reaction, so a button, a row and a
 /// switch thumb all behave identically.
@@ -367,11 +406,16 @@ class Jelly extends StatefulWidget {
 }
 
 class _JellyState extends State<Jelly> with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController.unbounded(vsync: this, value: 0);
+  late final AnimationController _c = AnimationController.unbounded(
+    vsync: this,
+    value: 0,
+  );
 
-  void _down() => _c.animateTo(1,
-      duration: const Duration(milliseconds: 45), curve: Curves.easeOut);
+  void _down() => _c.animateTo(
+    1,
+    duration: const Duration(milliseconds: 45),
+    curve: Curves.easeOut,
+  );
 
   void _up() =>
       _c.animateWith(SpringSimulation(kJellySpring, _c.value, 0, _c.velocity));
@@ -433,12 +477,17 @@ class _JellyTapState extends State<JellyTap>
     with SingleTickerProviderStateMixin {
   // 0 = rest, 1 = fully pressed. Unbounded so the spring release overshoots
   // below 0 — the wobble past the resting size (the "hit the wall" bounce).
-  late final AnimationController _c =
-      AnimationController.unbounded(vsync: this, value: 0);
+  late final AnimationController _c = AnimationController.unbounded(
+    vsync: this,
+    value: 0,
+  );
 
   // Snap to pressed almost instantly so it shows on a quick tap too.
-  void _press(TapDownDetails _) => _c.animateTo(1,
-      duration: const Duration(milliseconds: 45), curve: Curves.easeOut);
+  void _press(TapDownDetails _) => _c.animateTo(
+    1,
+    duration: const Duration(milliseconds: 45),
+    curve: Curves.easeOut,
+  );
 
   void _release() =>
       _c.animateWith(SpringSimulation(kJellySpring, _c.value, 0, _c.velocity));
@@ -495,11 +544,17 @@ class _JellySwitchState extends State<JellySwitch>
   static const _h = 32.0;
   static const _thumb = 24.0;
 
-  late final AnimationController _c =
-      AnimationController.unbounded(vsync: this, value: widget.value ? 1 : 0);
+  late final AnimationController _c = AnimationController.unbounded(
+    vsync: this,
+    value: widget.value ? 1 : 0,
+  );
   // Stiffer and better damped than the tap spring: a switch should arrive
   // decisively, with the wobble in the shape rather than the position.
-  static const _travel = SpringDescription(mass: 1, stiffness: 300, damping: 17);
+  static const _travel = SpringDescription(
+    mass: 1,
+    stiffness: 300,
+    damping: 17,
+  );
 
   bool _held = false;
 
@@ -542,15 +597,22 @@ class _JellySwitchState extends State<JellySwitch>
               final v = (_c.velocity / 26).clamp(-1.0, 1.0).abs();
               final stretch = v * 0.30 + (_held ? 0.10 : 0);
               final trackOn = Color.lerp(
-                  scheme.surfaceContainerHighest, scheme.primary, on)!;
-              final thumbColor =
-                  Color.lerp(scheme.outline, scheme.onPrimary, on)!;
+                scheme.surfaceContainerHighest,
+                scheme.primary,
+                on,
+              )!;
+              final thumbColor = Color.lerp(
+                scheme.outline,
+                scheme.onPrimary,
+                on,
+              )!;
               final travel = _w - _thumb - 8;
               final dx = 4 + travel * t;
               // Anchor the squash to the leading edge so it presses into the
               // end it's arriving at.
-              final anchor = _c.velocity >= 0 ? Alignment.centerRight
-                                              : Alignment.centerLeft;
+              final anchor = _c.velocity >= 0
+                  ? Alignment.centerRight
+                  : Alignment.centerLeft;
               return Opacity(
                 opacity: enabled ? 1 : 0.5,
                 child: Stack(
@@ -626,6 +688,10 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
     with SingleTickerProviderStateMixin {
   static const _height = 46.0;
   static const _pad = 4.0;
+
+  /// Space between one choice and the next. Wide enough that each reads as its
+  /// own chip instead of the four running together into one bar.
+  static const _gap = 3.5;
 
   late final AnimationController _c = AnimationController.unbounded(
     vsync: this,
@@ -706,9 +772,9 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                       borderRadius: BorderRadius.circular(_height / 2),
                     ),
                   ),
-                  // Every slot carries the same tablet, dimmed — so the row
-                  // reads as a set of choices rather than one live button next
-                  // to three bare words. The accent pill slides on top of it.
+                  // Every choice sits in its own chip, dimmed — so the row reads
+                  // as four separate options rather than one live button beside
+                  // three bare words. The accent pill slides on top of them.
                   Padding(
                     padding: const EdgeInsets.all(_pad),
                     child: Row(
@@ -716,14 +782,23 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                         for (var i = 0; i < n; i++)
                           Expanded(
                             child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 1.5),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: _gap,
+                              ),
                               child: DecoratedBox(
                                 decoration: BoxDecoration(
-                                  color: scheme.onSurface
-                                      .withValues(alpha: 0.055),
+                                  color: scheme.onSurface.withValues(
+                                    alpha: 0.06,
+                                  ),
+                                  border: Border.all(
+                                    color: scheme.onSurface.withValues(
+                                      alpha: 0.10,
+                                    ),
+                                    width: 1,
+                                  ),
                                   borderRadius: BorderRadius.circular(
-                                      (_height - _pad * 2) / 2),
+                                    (_height - _pad * 2) / 2,
+                                  ),
                                 ),
                               ),
                             ),
@@ -735,10 +810,11 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                     animation: _c,
                     builder: (context, _) {
                       // Speed → length. The pill keeps its centre, so it grows
-                      // out of both ends rather than lurching forward.
-                      final stretch =
-                          (_c.velocity.abs() / 26).clamp(0.0, 0.38);
-                      final w = slot * (1 + stretch);
+                      // out of both ends rather than lurching forward. Its
+                      // resting width matches a chip exactly, gaps included, so
+                      // it lands on one instead of straddling its neighbours.
+                      final stretch = (_c.velocity.abs() / 26).clamp(0.0, 0.38);
+                      final w = (slot - _gap * 2) * (1 + stretch);
                       final centre = _pad + slot * (_c.value + 0.5);
                       return Positioned(
                         left: centre - w / 2,
@@ -748,8 +824,9 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                         child: Container(
                           decoration: BoxDecoration(
                             color: scheme.primary,
-                            borderRadius:
-                                BorderRadius.circular((_height - _pad * 2) / 2),
+                            borderRadius: BorderRadius.circular(
+                              (_height - _pad * 2) / 2,
+                            ),
                           ),
                         ),
                       );
@@ -929,8 +1006,10 @@ class JellyStretch extends StatefulWidget {
 
 class _JellyStretchState extends State<JellyStretch>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+  );
 
   // +1 = travelled toward the higher index (right / down), -1 = the other way.
   // The scale is anchored to that edge so the squish presses into that wall.
@@ -980,16 +1059,22 @@ class _JellyStretchState extends State<JellyStretch>
 
 TextStyle sectionLabelStyle(BuildContext context) {
   final scheme = Theme.of(context).colorScheme;
-  return Theme.of(context)
-      .textTheme
-      .labelLarge!
-      .copyWith(color: scheme.onSurfaceVariant, fontWeight: FontWeight.w700, letterSpacing: 0.3);
+  return Theme.of(context).textTheme.labelLarge!.copyWith(
+    color: scheme.onSurfaceVariant,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.3,
+  );
 }
 
 /// A section title row: optional leading icon, a label, and an optional
 /// trailing count pill — the one section header used across both screens.
 class SectionHeader extends StatelessWidget {
-  const SectionHeader({super.key, this.icon, required this.label, this.trailing});
+  const SectionHeader({
+    super.key,
+    this.icon,
+    required this.label,
+    this.trailing,
+  });
 
   final IconData? icon;
   final String label;
@@ -1024,15 +1109,19 @@ class CountPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(
-        color: highlight ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+        color: highlight
+            ? scheme.primaryContainer
+            : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: highlight ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
+          color: highlight
+              ? scheme.onPrimaryContainer
+              : scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -1059,7 +1148,8 @@ class ReelText extends StatefulWidget {
   State<ReelText> createState() => _ReelTextState();
 }
 
-class _ReelTextState extends State<ReelText> with SingleTickerProviderStateMixin {
+class _ReelTextState extends State<ReelText>
+    with SingleTickerProviderStateMixin {
   // Starts settled (value 1) so the very first frame just shows the text —
   // no phantom transition on mount.
   late final AnimationController _c = AnimationController(
@@ -1067,8 +1157,10 @@ class _ReelTextState extends State<ReelText> with SingleTickerProviderStateMixin
     duration: const Duration(milliseconds: 300),
     value: 1,
   );
-  late final Animation<double> _t =
-      CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+  late final Animation<double> _t = CurvedAnimation(
+    parent: _c,
+    curve: Curves.easeOutCubic,
+  );
 
   late String _shown = widget.text;
   String? _leaving;
@@ -1107,16 +1199,24 @@ class _ReelTextState extends State<ReelText> with SingleTickerProviderStateMixin
                 opacity: 1 - t,
                 child: Transform.translate(
                   offset: Offset(0, -t * _travel),
-                  child: Text(_leaving!,
-                      style: widget.style, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  child: Text(
+                    _leaving!,
+                    style: widget.style,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
             Opacity(
               opacity: t,
               child: Transform.translate(
                 offset: Offset(0, (1 - t) * _travel),
-                child: Text(_shown,
-                    style: widget.style, maxLines: 1, overflow: TextOverflow.ellipsis),
+                child: Text(
+                  _shown,
+                  style: widget.style,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ],
@@ -1144,7 +1244,9 @@ class ReelPill extends StatelessWidget {
       curve: Curves.easeOutCubic,
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
       decoration: BoxDecoration(
-        color: highlight ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+        color: highlight
+            ? scheme.primaryContainer
+            : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
       ),
       child: AnimatedSize(
@@ -1155,7 +1257,9 @@ class ReelPill extends StatelessWidget {
           child: ReelText(
             text: text,
             style: TextStyle(
-              color: highlight ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
+              color: highlight
+                  ? scheme.onPrimaryContainer
+                  : scheme.onSurfaceVariant,
               fontWeight: FontWeight.w700,
               fontSize: 13,
             ),
@@ -1200,15 +1304,24 @@ class FadeInSlide extends StatefulWidget {
   State<FadeInSlide> createState() => _FadeInSlideState();
 }
 
-class _FadeInSlideState extends State<FadeInSlide> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller =
-      AnimationController(vsync: this, duration: widget.duration);
-  late final Animation<double> _fade =
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut);
-  late final Animation<Offset> _slide = Tween(begin: widget.offset, end: Offset.zero)
-      .animate(CurvedAnimation(parent: _controller, curve: widget.curve));
-  late final Animation<double> _scale = Tween(begin: widget.scaleFrom, end: 1.0)
-      .animate(CurvedAnimation(parent: _controller, curve: widget.curve));
+class _FadeInSlideState extends State<FadeInSlide>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.duration,
+  );
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOut,
+  );
+  late final Animation<Offset> _slide = Tween(
+    begin: widget.offset,
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: _controller, curve: widget.curve));
+  late final Animation<double> _scale = Tween(
+    begin: widget.scaleFrom,
+    end: 1.0,
+  ).animate(CurvedAnimation(parent: _controller, curve: widget.curve));
 
   @override
   void initState() {
@@ -1266,11 +1379,16 @@ class RowReveal extends StatefulWidget {
   State<RowReveal> createState() => _RowRevealState();
 }
 
-class _RowRevealState extends State<RowReveal> with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController(vsync: this, duration: widget.duration);
-  late final Animation<double> _fade =
-      CurvedAnimation(parent: _c, curve: Curves.easeOut);
+class _RowRevealState extends State<RowReveal>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: widget.duration,
+  );
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _c,
+    curve: Curves.easeOut,
+  );
   late final Animation<Offset> _slide = Tween(
     begin: const Offset(0, 0.14),
     end: Offset.zero,
@@ -1376,7 +1494,8 @@ class _PolygonPainter extends CustomPainter {
   // The shapes it cycles through, by lobe count.
   static const _lobes = <int>[3, 4, 5, 6, 4];
   static const _amp = 0.17; // how pronounced the corners read
-  static const _steps = 72; // enough for a smooth ≤34px glyph; half the per-frame trig
+  static const _steps =
+      72; // enough for a smooth ≤34px glyph; half the per-frame trig
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1406,7 +1525,12 @@ class _PolygonPainter extends CustomPainter {
     }
     path.close();
 
-    canvas.drawPath(path, Paint()..color = color..isAntiAlias = true);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..isAntiAlias = true,
+    );
   }
 
   static double _lerp(double a, double b, double t) => a + (b - a) * t;
@@ -1446,7 +1570,9 @@ class PolygonScrollView extends StatelessWidget {
       padding.bottom,
     );
     return CustomScrollView(
-      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
       slivers: [
         CupertinoSliverRefreshControl(
           onRefresh: () {

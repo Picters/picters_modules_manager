@@ -60,9 +60,9 @@ class RootSession {
       p.stdin.writeln('exec 2>&1');
       _proc = p;
       _lines = StreamQueue<String>(
-        p.stdout.transform(const Utf8Decoder(allowMalformed: true)).transform(
-              const LineSplitter(),
-            ),
+        p.stdout
+            .transform(const Utf8Decoder(allowMalformed: true))
+            .transform(const LineSplitter()),
       );
       // Probe: if root was denied the shell exits and this throws/times out.
       final probe = await _run('id', const Duration(seconds: 20));
@@ -228,8 +228,7 @@ class DefaultRootRunner implements RootRunner {
   Future<ShellResult> run(
     String script, {
     Duration timeout = const Duration(seconds: 30),
-  }) =>
-      RootShell.run(script, timeout: timeout);
+  }) => RootShell.run(script, timeout: timeout);
 }
 
 /// Facade used across the app. Routes each command through the AIDL/Binder root

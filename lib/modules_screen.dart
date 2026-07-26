@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'glass.dart';
 import 'app_controller.dart';
 import 'module_categories.dart';
 import 'module_info.dart';
@@ -71,13 +72,15 @@ class _ModulesScreenState extends State<ModulesScreen> {
       // enable those in place instead of surfacing a cryptic kernel error.
       final plan = controller.planFor(m);
       if (plan.needsInjectMode) {
-        showError(
-            context, 'Enable Inject mode on the Overview screen first.');
+        showError(context, 'Enable Inject mode on the Overview screen first.');
         return;
       }
       if (plan.hasMissingDeps) {
-        final ok =
-            await showDependencyDialog(context, module: m.name, deps: plan.toLoad);
+        final ok = await showDependencyDialog(
+          context,
+          module: m.name,
+          deps: plan.toLoad,
+        );
         if (ok != true || !mounted) return;
         await controller.loadModuleWithDeps(m, plan.toLoad);
         return;
@@ -88,8 +91,11 @@ class _ModulesScreenState extends State<ModulesScreen> {
       // up; offer to unload them first instead of a bare "Module is in use".
       final dependents = controller.loadedDependentsOf(m);
       if (dependents.isNotEmpty) {
-        final ok = await showDependentsDialog(context,
-            module: m.name, dependents: dependents);
+        final ok = await showDependentsDialog(
+          context,
+          module: m.name,
+          dependents: dependents,
+        );
         if (ok != true || !mounted) return;
         await controller.unloadModuleWithDependents(m, dependents);
         return;
@@ -105,10 +111,7 @@ class _ModulesScreenState extends State<ModulesScreen> {
     final message = controller.moduleErrors[m.name];
     final dmesg = await controller.fetchModuleDmesg(m);
     if (!mounted) return;
-    final parts = <String>[
-      ?message,
-      if (dmesg.isNotEmpty) dmesg,
-    ];
+    final parts = <String>[?message, if (dmesg.isNotEmpty) dmesg];
     showDiagnosticsDialog(context, parts.join('\n\n'));
   }
 
@@ -118,18 +121,23 @@ class _ModulesScreenState extends State<ModulesScreen> {
       animation: controller,
       builder: (context, _) {
         final state = controller.state;
-        final modules =
-            state.modules.where((m) => !_hiddenModules.contains(m.name)).toList();
+        final modules = state.modules
+            .where((m) => !_hiddenModules.contains(m.name))
+            .toList();
 
         if (!state.modulesDirExists || modules.isEmpty) {
           return _EmptyModules(onRetry: controller.refresh);
         }
 
-        final visible = modules.where((m) => switch (_filter) {
-              _LoadFilter.all => true,
-              _LoadFilter.loaded => m.loaded,
-              _LoadFilter.unloaded => !m.loaded,
-            }).toList();
+        final visible = modules
+            .where(
+              (m) => switch (_filter) {
+                _LoadFilter.all => true,
+                _LoadFilter.loaded => m.loaded,
+                _LoadFilter.unloaded => !m.loaded,
+              },
+            )
+            .toList();
 
         return PolygonScrollView(
           onRefresh: controller.refresh,
@@ -157,16 +165,22 @@ class _ModulesScreenState extends State<ModulesScreen> {
     );
   }
 
-  List<Widget> _buildSearchResults(BuildContext context, List<ModuleInfo> modules) {
-    final matches =
-        modules.where((m) => m.name.toLowerCase().contains(_query)).toList();
+  List<Widget> _buildSearchResults(
+    BuildContext context,
+    List<ModuleInfo> modules,
+  ) {
+    final matches = modules
+        .where((m) => m.name.toLowerCase().contains(_query))
+        .toList();
     if (matches.isEmpty) {
       return [
         const SizedBox(height: 40),
         Center(
           child: Text(
             'No module matches "$_query".',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       ];
@@ -275,7 +289,11 @@ class _FilterEmpty extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.filter_list_off, size: 40, color: scheme.onSurfaceVariant),
+            Icon(
+              Icons.filter_list_off,
+              size: 40,
+              color: scheme.onSurfaceVariant,
+            ),
             const SizedBox(height: 12),
             Text(message, style: TextStyle(color: scheme.onSurfaceVariant)),
           ],
@@ -305,13 +323,15 @@ class _SearchField extends StatelessWidget {
           valueListenable: controller,
           builder: (context, value, _) => value.text.isEmpty
               ? const SizedBox.shrink()
-              : Jelly(child: IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () {
-                    controller.clear();
-                    onChanged('');
-                  },
-                )),
+              : Jelly(
+                  child: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      controller.clear();
+                      onChanged('');
+                    },
+                  ),
+                ),
         ),
         filled: true,
         fillColor: scheme.surfaceContainerHighest,
@@ -345,6 +365,7 @@ class _ModuleGroup extends StatefulWidget {
   final IconData icon;
   final List<ModuleInfo> modules;
   final AppController controller;
+
   /// Returns a future the row awaits before giving up its optimistic position:
   /// this can end in a confirmation the user declines, in which case nothing
   /// changes and there is no state update to reconcile against.
@@ -373,120 +394,133 @@ class _ModuleGroupState extends State<_ModuleGroup> {
     final controller = widget.controller;
     final total = modules.length;
     final on = modules.where((m) => m.loaded).length;
-    final hasError =
-        modules.any((m) => controller.moduleErrors.containsKey(m.name));
+    final hasError = modules.any(
+      (m) => controller.moduleErrors.containsKey(m.name),
+    );
     final active = on > 0;
 
-    return RepaintBoundary(child: Card.outlined(
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          JellyTap(
-            onTap: _toggle,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-              child: Row(
-                children: [
-                  // Leading category icon — anchors the block and fills the
-                  // left space so the header reads as a real, substantial row.
-                  Container(
-                    width: 46,
-                    height: 46,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: active
-                          ? scheme.primaryContainer
-                          : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(15),
+    return RepaintBoundary(
+      child: GlassCard(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            JellyTap(
+              onTap: _toggle,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                child: Row(
+                  children: [
+                    // Leading category icon — anchors the block and fills the
+                    // left space so the header reads as a real, substantial row.
+                    Container(
+                      width: 46,
+                      height: 46,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: active
+                            ? scheme.primaryContainer
+                            : scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: Icon(
+                        widget.icon,
+                        size: 23,
+                        color: active
+                            ? scheme.onPrimaryContainer
+                            : scheme.onSurfaceVariant,
+                      ),
                     ),
-                    child: Icon(
-                      widget.icon,
-                      size: 23,
-                      color: active
-                          ? scheme.onPrimaryContainer
-                          : scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.label,
-                          style: textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: scheme.onSurface,
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.label,
+                            style: textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: scheme.onSurface,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          active ? '$on of $total loaded' : '$total available',
-                          style: textTheme.bodySmall
-                              ?.copyWith(color: scheme.onSurfaceVariant),
-                        ),
-                      ],
+                          const SizedBox(height: 2),
+                          Text(
+                            active
+                                ? '$on of $total loaded'
+                                : '$total available',
+                            style: textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  if (hasError) ...[
-                    Icon(Icons.error_outline, color: scheme.error, size: 20),
-                    const SizedBox(width: 10),
+                    if (hasError) ...[
+                      Icon(Icons.error_outline, color: scheme.error, size: 20),
+                      const SizedBox(width: 10),
+                    ],
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0.0,
+                      duration: const Duration(milliseconds: 240),
+                      curve: Curves.easeOutCubic,
+                      child: Icon(
+                        Icons.expand_more,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
                   ],
-                  AnimatedRotation(
-                    turns: _expanded ? 0.5 : 0.0,
-                    duration: const Duration(milliseconds: 240),
-                    curve: Curves.easeOutCubic,
-                    child: Icon(Icons.expand_more, color: scheme.onSurfaceVariant),
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
-          AnimatedCrossFade(
-            firstChild: const SizedBox(width: double.infinity, height: 0),
-            secondChild: Column(
-              children: [
-                const CardDivider(),
-                for (var i = 0; i < modules.length; i++) ...[
-                  if (i > 0) const CardDivider(),
-                  _ModuleRow(
-                    module: modules[i],
-                    busy: controller.moduleBusy.contains(modules[i].name),
-                    hasError: controller.moduleErrors.containsKey(modules[i].name),
-                    optimisticLoaded: controller.optimisticModuleLoaded[modules[i].name],
-                    onChanged: (v) => widget.onToggle(modules[i], v),
-                    onShowError: () => widget.onShowError(modules[i]),
-                  ),
+            AnimatedCrossFade(
+              firstChild: const SizedBox(width: double.infinity, height: 0),
+              secondChild: Column(
+                children: [
+                  const CardDivider(),
+                  for (var i = 0; i < modules.length; i++) ...[
+                    if (i > 0) const CardDivider(),
+                    _ModuleRow(
+                      module: modules[i],
+                      busy: controller.moduleBusy.contains(modules[i].name),
+                      hasError: controller.moduleErrors.containsKey(
+                        modules[i].name,
+                      ),
+                      optimisticLoaded:
+                          controller.optimisticModuleLoaded[modules[i].name],
+                      onChanged: (v) => widget.onToggle(modules[i], v),
+                      onShowError: () => widget.onShowError(modules[i]),
+                    ),
+                  ],
+                  const SizedBox(height: 4),
                 ],
-                const SizedBox(height: 4),
-              ],
+              ),
+              crossFadeState: _expanded
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+              duration: const Duration(milliseconds: 240),
+              sizeCurve: Curves.easeOutCubic,
+              firstCurve: Curves.easeOut,
+              secondCurve: Curves.easeOut,
             ),
-            crossFadeState:
-                _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 240),
-            sizeCurve: Curves.easeOutCubic,
-            firstCurve: Curves.easeOut,
-            secondCurve: Curves.easeOut,
-          ),
-        ],
+          ],
+        ),
       ),
-    ));
+    );
   }
 }
 
 /// A representative icon per module group, so each expander header carries a
 /// recognisable glyph instead of empty space.
 IconData _categoryIcon(ModuleCategory cat) => switch (cat) {
-      ModuleCategory.bluetooth => Icons.bluetooth,
-      ModuleCategory.can => Icons.directions_car_filled_outlined,
-      ModuleCategory.sdr => Icons.settings_input_antenna,
-      ModuleCategory.usbSerial => Icons.cable,
-      ModuleCategory.usbEthernet => Icons.lan_outlined,
-      ModuleCategory.netfilter => Icons.shield_outlined,
-      ModuleCategory.filesystem => Icons.folder_outlined,
-      ModuleCategory.other => Icons.extension_outlined,
-    };
+  ModuleCategory.bluetooth => Icons.bluetooth,
+  ModuleCategory.can => Icons.directions_car_filled_outlined,
+  ModuleCategory.sdr => Icons.settings_input_antenna,
+  ModuleCategory.usbSerial => Icons.cable,
+  ModuleCategory.usbEthernet => Icons.lan_outlined,
+  ModuleCategory.netfilter => Icons.shield_outlined,
+  ModuleCategory.filesystem => Icons.folder_outlined,
+  ModuleCategory.other => Icons.extension_outlined,
+};
 
 class _ModuleRow extends StatefulWidget {
   const _ModuleRow({
@@ -583,14 +617,16 @@ class _ModuleRowState extends State<_ModuleRow> {
               MorphingPolygon(size: 18, color: scheme.primary),
               const SizedBox(width: 12),
             ] else if (widget.hasError) ...[
-              Jelly(child: IconButton(
-                visualDensity: VisualDensity.compact,
-                iconSize: 20,
-                color: scheme.error,
-                icon: const Icon(Icons.error_outline),
-                tooltip: 'Show error',
-                onPressed: widget.onShowError,
-              )),
+              Jelly(
+                child: IconButton(
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 20,
+                  color: scheme.error,
+                  icon: const Icon(Icons.error_outline),
+                  tooltip: 'Show error',
+                  onPressed: widget.onShowError,
+                ),
+              ),
               const SizedBox(width: 4),
             ],
             JellySwitch(value: _shown, onChanged: (_) => _toggle()),
@@ -613,12 +649,16 @@ class _EmptyModules extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
       children: [
         const SizedBox(height: 100),
-        Card.outlined(
+        GlassCard(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
             child: Column(
               children: [
-                Icon(Icons.inventory_2_outlined, size: 48, color: scheme.onSurfaceVariant),
+                Icon(
+                  Icons.inventory_2_outlined,
+                  size: 48,
+                  color: scheme.onSurfaceVariant,
+                ),
                 const SizedBox(height: 16),
                 Text(
                   'No OOT modules found',
@@ -630,10 +670,9 @@ class _EmptyModules extends StatelessWidget {
                   'Install the OOT modules zip in KernelSU or Magisk, then '
                   'reopen the app.',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: scheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),

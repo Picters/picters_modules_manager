@@ -5,11 +5,13 @@ import 'package:flutter/services.dart';
 /// Small native-side helper that doesn't fit the root-shell model: requesting
 /// a pinned home-screen shortcut (needs the real Android ShortcutManager API).
 class NativeBridge {
-  static const MethodChannel _channel =
-      MethodChannel('com.picters.modulesmanager/system');
+  static const MethodChannel _channel = MethodChannel(
+    'com.picters.modulesmanager/system',
+  );
 
-  static const EventChannel _usbEvents =
-      EventChannel('com.picters.modulesmanager/system/usb_events');
+  static const EventChannel _usbEvents = EventChannel(
+    'com.picters.modulesmanager/system/usb_events',
+  );
 
   /// Emits whenever a USB device is attached or detached (a system broadcast),
   /// so the UI can refresh the scan immediately instead of waiting for the next
@@ -75,8 +77,10 @@ class NativeBridge {
   /// true only once the file is copied to the chosen location.
   static Future<bool> saveFile(String path, String name) async {
     try {
-      return await _channel
-              .invokeMethod<bool>('saveFile', {'path': path, 'name': name}) ??
+      return await _channel.invokeMethod<bool>('saveFile', {
+            'path': path,
+            'name': name,
+          }) ??
           false;
     } on PlatformException {
       return false;

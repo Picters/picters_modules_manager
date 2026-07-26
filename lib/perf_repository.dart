@@ -22,19 +22,20 @@ const String kKernelPerfDir = '/sys/kernel/picters_perf';
 const String kKernelCpuMaxNode = '$kKernelPerfDir/cpu_max_freq';
 const String kKernelProfileNode = '$kKernelPerfDir/profile';
 
-List<int> _parseFreqList(String s) => s
-    .trim()
-    .split(RegExp(r'\s+'))
-    .map((t) => int.tryParse(t.trim()))
-    .whereType<int>()
-    .toList()
-  ..sort();
+List<int> _parseFreqList(String s) =>
+    s
+        .trim()
+        .split(RegExp(r'\s+'))
+        .map((t) => int.tryParse(t.trim()))
+        .whereType<int>()
+        .toList()
+      ..sort();
 
 /// Reads and applies CPU/GPU frequency caps over root. Every applied value is
 /// snapped to a real OPP step by [cappedMax], so nothing unsafe is ever written.
 class PerfRepository {
   PerfRepository([RootRunner runner = const DefaultRootRunner()])
-      : _shell = runner;
+    : _shell = runner;
 
   final RootRunner _shell;
 
@@ -77,7 +78,11 @@ class PerfRepository {
     final kernelPairs = <String>[];
     for (final c in state.clusters) {
       final freq = cappedMax(
-          profile, cpuDomain(c, state.clusters), c.maxHardware, c.availableFreqs);
+        profile,
+        cpuDomain(c, state.clusters),
+        c.maxHardware,
+        c.availableFreqs,
+      );
       final node = '$_cpuBase/${c.policy}/scaling_max_freq';
       b.writeln("echo $freq > '$node' 2>/dev/null");
       cpuLines.add('cpu $_cpuBase/${c.policy} $freq');
@@ -90,14 +95,19 @@ class PerfRepository {
     }
     if (state.kernelCapsSupported && kernelPairs.isNotEmpty) {
       b.writeln(
-          "echo '${kernelPairs.join(' ')}' > '$kKernelCpuMaxNode' 2>/dev/null");
+        "echo '${kernelPairs.join(' ')}' > '$kKernelCpuMaxNode' 2>/dev/null",
+      );
       b.writeln("echo '${profile.name}' > '$kKernelProfileNode' 2>/dev/null");
     }
     String? gpuLine;
     final gpu = state.gpu;
     if (gpu != null && gpu.stockMax > 0) {
-      final gfreq =
-          cappedMax(profile, PerfDomain.gpu, gpu.stockMax, gpu.availableFreqs);
+      final gfreq = cappedMax(
+        profile,
+        PerfDomain.gpu,
+        gpu.stockMax,
+        gpu.availableFreqs,
+      );
       b.writeln("echo $gfreq > '$kGpuMaxNode' 2>/dev/null");
       gpuLine = 'gpu $gfreq';
     }
@@ -134,7 +144,8 @@ PerfState parsePerfScan(String out) {
   var gpuAvail = <int>[];
   var gpuMax = 0;
   final conf = <String, String>{};
-  final confCpu = <String, int>{}; // policyPath -> freq (unused for state, kept simple)
+  final confCpu =
+      <String, int>{}; // policyPath -> freq (unused for state, kept simple)
   var bootOk = false;
   var kernelOk = false;
 
@@ -204,14 +215,16 @@ PerfState parsePerfScan(String out) {
         .map(int.tryParse)
         .whereType<int>()
         .toList();
-    clusters.add(CpuCluster(
-      policy: entry.key,
-      cpus: cpus,
-      maxHardware: f.length > 2 ? (int.tryParse(f[2].trim()) ?? 0) : 0,
-      scalingMax: f.length > 3 ? (int.tryParse(f[3].trim()) ?? 0) : 0,
-      availableFreqs: freqByPolicy[entry.key] ?? const [],
-      governor: f.length > 4 ? f[4].trim() : '',
-    ));
+    clusters.add(
+      CpuCluster(
+        policy: entry.key,
+        cpus: cpus,
+        maxHardware: f.length > 2 ? (int.tryParse(f[2].trim()) ?? 0) : 0,
+        scalingMax: f.length > 3 ? (int.tryParse(f[3].trim()) ?? 0) : 0,
+        availableFreqs: freqByPolicy[entry.key] ?? const [],
+        governor: f.length > 4 ? f[4].trim() : '',
+      ),
+    );
   }
   clusters.sort((a, b) => a.policy.compareTo(b.policy));
 
