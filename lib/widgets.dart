@@ -763,38 +763,46 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                       );
                     },
                   ),
-                  Row(
-                    children: [
-                      for (final v in widget.values)
-                        Expanded(
-                          child: JellyTap(
-                            pressScale: 0.9,
-                            onTap: () => _select(v),
-                            child: SizedBox(
-                              height: _height,
-                              child: Center(
-                                child: AnimatedDefaultTextStyle(
-                                  duration: const Duration(milliseconds: 180),
-                                  style: TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: v == _shown
-                                        ? FontWeight.w700
-                                        : FontWeight.w600,
-                                    color: v == _shown
-                                        ? scheme.onPrimary
-                                        : scheme.onSurfaceVariant,
-                                  ),
-                                  child: Text(
-                                    widget.labelOf(v),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                  // Inset by the same _pad the pill is, so each label cell is
+                  // exactly one `slot` wide and shares its centre. Without this
+                  // the row divides the FULL width by n while the pill divides
+                  // the padded width, and the two drift further apart every
+                  // segment along.
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: _pad),
+                    child: Row(
+                      children: [
+                        for (final v in widget.values)
+                          Expanded(
+                            child: JellyTap(
+                              pressScale: 0.9,
+                              onTap: () => _select(v),
+                              child: SizedBox(
+                                height: _height,
+                                child: Center(
+                                  child: AnimatedDefaultTextStyle(
+                                    duration: const Duration(milliseconds: 180),
+                                    style: TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: v == _shown
+                                          ? FontWeight.w700
+                                          : FontWeight.w600,
+                                      color: v == _shown
+                                          ? scheme.onPrimary
+                                          : scheme.onSurfaceVariant,
+                                    ),
+                                    child: Text(
+                                      widget.labelOf(v),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
