@@ -596,12 +596,11 @@ class _JellySwitchState extends State<JellySwitch>
   }
 }
 
-/// A segmented picker with a single sliding pill instead of per-segment
-/// outlines. Material's SegmentedButton gives every option its own border and
-/// its own padding, so four options stop fitting on a phone; here the segments
-/// share one track, split it evenly and never wrap. The pill springs between
-/// them and stretches along the way — the further it travels, the longer it
-/// gets, snapping back once it lands.
+/// A segmented picker built like the Wi-Fi Stock/Inject toggle on Overview: one
+/// shared track with a single solid tablet that slides onto the chosen option.
+/// Material's SegmentedButton gives every option its own border and padding, so
+/// four of them stop fitting on a phone — here they split one track evenly and
+/// never wrap.
 class JellySegmented<T> extends StatefulWidget {
   const JellySegmented({
     super.key,
@@ -622,45 +621,16 @@ class JellySegmented<T> extends StatefulWidget {
   State<JellySegmented<T>> createState() => _JellySegmentedState<T>();
 }
 
-class _JellySegmentedState<T> extends State<JellySegmented<T>>
-    with SingleTickerProviderStateMixin {
-  static const _height = 46.0;
-  static const _pad = 4.0;
+class _JellySegmentedState<T> extends State<JellySegmented<T>> {
+  static const double _pad = 5;
+  static const double _height = 52;
 
-  /// Space between one choice and the next. Wide enough that each reads as its
-  /// own chip instead of the four running together into one bar.
-  static const _gap = 3.5;
-
-  late final AnimationController _c = AnimationController.unbounded(
-    vsync: this,
-    value: widget.values.indexOf(widget.selected).toDouble(),
-  );
-  // Enough overshoot to feel alive, not enough to look loose.
-  static const _slide = SpringDescription(mass: 1, stiffness: 240, damping: 19);
-
-  // Same optimistic pattern as JellySwitchTile: the pill moves to the tapped
-  // segment at once, and [selected] only takes over once onSelect's Future
-  // resolves — a root round-trip is far too slow to wait on before the pill
-  // can even start sliding.
+  /// The tapped option, shown until the action behind it resolves. A root
+  /// round-trip is far too slow to wait on before the tablet may start moving.
   T? _pending;
   bool _inFlight = false;
 
   T get _shown => _pending ?? widget.selected;
-
-  void _animateTo(T value) {
-    final target = widget.values.indexOf(value).toDouble();
-    if (target >= 0) {
-      _c.animateWith(SpringSimulation(_slide, _c.value, target, _c.velocity));
-    }
-  }
-
-  @override
-  void didUpdateWidget(JellySegmented<T> old) {
-    super.didUpdateWidget(old);
-    if (_pending == null && widget.selected != old.selected) {
-      _animateTo(widget.selected);
-    }
-  }
 
   Future<void> _select(T v) async {
     if (_inFlight || v == _shown) return;
@@ -668,12 +638,13 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
       _pending = v;
       _inFlight = true;
     });
-    _animateTo(v);
     try {
       await Future<void>.delayed(const Duration(milliseconds: 90));
       if (!mounted) return;
       await widget.onSelect(v);
     } finally {
+      // Reality is authoritative again whatever happened — including an action
+      // that changed nothing, which would otherwise strand the tablet.
       if (mounted) {
         setState(() {
           _pending = null;
@@ -684,140 +655,95 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
   }
 
   @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final n = widget.values.length;
-    return Opacity(
-      opacity: widget.enabled ? 1 : 0.5,
-      child: IgnorePointer(
-        ignoring: !widget.enabled,
-        child: LayoutBuilder(
-          builder: (context, box) {
-            final slot = (box.maxWidth - _pad * 2) / n;
-            return SizedBox(
-              height: _height,
-              child: Stack(
-                children: [
-                  Container(
+    final index = widget.values.indexOf(_shown).clamp(0, n - 1);
+
+    final track = LayoutBuilder(
+      builder: (context, constraints) {
+        final cellW = (constraints.maxWidth - _pad * 2) / n;
+        return Container(
+          height: _height,
+          padding: const EdgeInsets.all(_pad),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Stack(
+            children: [
+              // easeOutCubic stops AT the target (never past the end cell, so it
+              // can't cross the wall); the JellyStretch supplies the squish.
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 320),
+                curve: Curves.easeOutCubic,
+                top: 0,
+                bottom: 0,
+                left: cellW * index,
+                width: cellW,
+                child: JellyStretch(
+                  trigger: index,
+                  child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(_height / 2),
+                      color: scheme.primary,
+                      borderRadius: BorderRadius.circular(14),
                     ),
                   ),
-                  // Every slot carries the same tablet, dimmed — so the row
-                  // reads as a set of choices rather than one live button next
-                  // to three bare words. The accent pill slides on top of it.
-                  Padding(
-                    padding: const EdgeInsets.all(_pad),
-                    child: Row(
-                      children: [
-                        for (var i = 0; i < n; i++)
-                          Expanded(
-                            child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: _gap),
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color:
-                                      scheme.onSurface.withValues(alpha: 0.06),
-                                  border: Border.all(
-                                    color: scheme.onSurface
-                                        .withValues(alpha: 0.10),
-                                    width: 1,
-                                  ),
-                                  borderRadius: BorderRadius.circular(
-                                      (_height - _pad * 2) / 2),
+                ),
+              ),
+              // Positioned.fill so the cells span the track's full height and
+              // centre their labels, instead of pinning to the Stack's top.
+              Positioned.fill(
+                child: Row(
+                  children: [
+                    for (var i = 0; i < n; i++)
+                      Expanded(
+                        child: JellyTap(
+                          pressScale: 0.9,
+                          onTap: () => _select(widget.values[i]),
+                          // Fill the cell so the whole tablet is tappable, not
+                          // just the band the text sits in.
+                          child: SizedBox(
+                            height: double.infinity,
+                            child: Center(
+                              child: AnimatedDefaultTextStyle(
+                                duration: const Duration(milliseconds: 180),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: i == index
+                                      ? scheme.onPrimary
+                                      : scheme.onSurfaceVariant,
+                                ),
+                                child: Text(
+                                  widget.labelOf(widget.values[i]),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  AnimatedBuilder(
-                    animation: _c,
-                    builder: (context, _) {
-                      // Speed → length. The pill keeps its centre, so it grows
-                      // out of both ends rather than lurching forward.
-                      final stretch =
-                          (_c.velocity.abs() / 26).clamp(0.0, 0.38);
-                      // Resting width matches a chip exactly, gaps included, so
-                      // the pill lands on one instead of straddling its
-                      // neighbours.
-                      final w = (slot - _gap * 2) * (1 + stretch);
-                      final centre = _pad + slot * (_c.value + 0.5);
-                      return Positioned(
-                        left: centre - w / 2,
-                        top: _pad,
-                        width: w,
-                        height: _height - _pad * 2,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: scheme.primary,
-                            borderRadius:
-                                BorderRadius.circular((_height - _pad * 2) / 2),
                           ),
                         ),
-                      );
-                    },
-                  ),
-                  // Inset by the same _pad the pill is, so each label cell is
-                  // exactly one `slot` wide and shares its centre. Without this
-                  // the row divides the FULL width by n while the pill divides
-                  // the padded width, and the two drift further apart every
-                  // segment along.
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: _pad),
-                    child: Row(
-                      children: [
-                        for (final v in widget.values)
-                          Expanded(
-                            child: JellyTap(
-                              pressScale: 0.9,
-                              onTap: () => _select(v),
-                              child: SizedBox(
-                                height: _height,
-                                child: Center(
-                                  child: AnimatedDefaultTextStyle(
-                                    duration: const Duration(milliseconds: 180),
-                                    style: TextStyle(
-                                      fontSize: 13.5,
-                                      fontWeight: v == _shown
-                                          ? FontWeight.w700
-                                          : FontWeight.w600,
-                                      color: v == _shown
-                                          ? scheme.onPrimary
-                                          : scheme.onSurfaceVariant,
-                                    ),
-                                    child: Text(
-                                      widget.labelOf(v),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
+                      ),
+                  ],
+                ),
               ),
-            );
-          },
-        ),
+            ],
+          ),
+        );
+      },
+    );
+
+    return IgnorePointer(
+      ignoring: !widget.enabled,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        opacity: widget.enabled ? 1 : 0.45,
+        child: track,
       ),
     );
   }
 }
-
 /// A [ListTile] row whose trailing control is a [JellySwitch] and whose whole
 /// row reacts to the press — the drop-in for SwitchListTile.
 ///
