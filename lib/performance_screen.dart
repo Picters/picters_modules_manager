@@ -118,7 +118,7 @@ class _ProfileHero extends StatelessWidget {
 
   /// The running kernel pins the ceilings itself (CONFIG_PICTERS_PERF).
   final bool hardCaps;
-  final ValueChanged<PerfProfile> onSelect;
+  final Future<void> Function(PerfProfile) onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -209,7 +209,6 @@ class _ProfileHero extends StatelessWidget {
               selected: profile,
               labelOf: (p) => p.shortLabel,
               onSelect: onSelect,
-              enabled: !busy,
             ),
             if (!hardCaps) ...[
               const SizedBox(height: 12),
@@ -265,7 +264,7 @@ class _ClusterRow extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: _FreqTablet(text: formatCpuFreq(cap), capped: capped),
+      trailing: ReelPill(text: formatCpuFreq(cap), highlight: capped),
     );
   }
 }
@@ -294,34 +293,7 @@ class _GpuRow extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: _FreqTablet(text: formatGpuFreq(cap), capped: capped),
-    );
-  }
-}
-
-class _FreqTablet extends StatelessWidget {
-  const _FreqTablet({required this.text, required this.capped});
-
-  final String text;
-  final bool capped;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-      decoration: BoxDecoration(
-        color: capped ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: capped ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
-          fontWeight: FontWeight.w700,
-          fontSize: 13,
-        ),
-      ),
+      trailing: ReelPill(text: formatGpuFreq(cap), highlight: capped),
     );
   }
 }

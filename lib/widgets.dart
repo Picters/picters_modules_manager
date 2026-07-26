@@ -648,7 +648,7 @@ class JellySegmented<T> extends StatefulWidget {
   final List<T> values;
   final T selected;
   final String Function(T) labelOf;
-  final ValueChanged<T> onSelect;
+  final Future<void> Function(T) onSelect;
   final bool enabled;
 
   @override
@@ -667,12 +667,48 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
   // Enough overshoot to feel alive, not enough to look loose.
   static const _slide = SpringDescription(mass: 1, stiffness: 240, damping: 19);
 
+  // Same optimistic pattern as JellySwitchTile: the pill moves to the tapped
+  // segment at once, and [selected] only takes over once onSelect's Future
+  // resolves — a root round-trip is far too slow to wait on before the pill
+  // can even start sliding.
+  T? _pending;
+  bool _inFlight = false;
+
+  T get _shown => _pending ?? widget.selected;
+
+  void _animateTo(T value) {
+    final target = widget.values.indexOf(value).toDouble();
+    if (target >= 0) {
+      _c.animateWith(SpringSimulation(_slide, _c.value, target, _c.velocity));
+    }
+  }
+
   @override
   void didUpdateWidget(JellySegmented<T> old) {
     super.didUpdateWidget(old);
-    final target = widget.values.indexOf(widget.selected).toDouble();
-    if (target >= 0 && target != old.values.indexOf(old.selected).toDouble()) {
-      _c.animateWith(SpringSimulation(_slide, _c.value, target, _c.velocity));
+    if (_pending == null && widget.selected != old.selected) {
+      _animateTo(widget.selected);
+    }
+  }
+
+  Future<void> _select(T v) async {
+    if (_inFlight || v == _shown) return;
+    setState(() {
+      _pending = v;
+      _inFlight = true;
+    });
+    _animateTo(v);
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      if (!mounted) return;
+      await widget.onSelect(v);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _pending = null;
+          _inFlight = false;
+        });
+      }
     }
   }
 
@@ -733,7 +769,7 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                         Expanded(
                           child: JellyTap(
                             pressScale: 0.9,
-                            onTap: () => widget.onSelect(v),
+                            onTap: () => _select(v),
                             child: SizedBox(
                               height: _height,
                               child: Center(
@@ -741,10 +777,10 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                                   duration: const Duration(milliseconds: 180),
                                   style: TextStyle(
                                     fontSize: 13.5,
-                                    fontWeight: v == widget.selected
+                                    fontWeight: v == _shown
                                         ? FontWeight.w700
                                         : FontWeight.w600,
-                                    color: v == widget.selected
+                                    color: v == _shown
                                         ? scheme.onPrimary
                                         : scheme.onSurfaceVariant,
                                   ),
@@ -864,12 +900,11 @@ class _JellySwitchTileState extends State<JellySwitchTile> {
   }
 }
 
-/// Gives a sliding tablet a "flings, then slams into the wall and squishes"
-/// jelly reaction whenever [trigger] changes. The squash is anchored to the
-/// LEADING (travel-direction) edge, so the tablet compresses *toward* the wall
-/// it arrives at instead of wobbling symmetrically — reads as hitting it. Pair
-/// with a no-overshoot position curve (easeOutCubic) so it never crosses the
-/// wall, only presses into it.
+/// Gives a sliding tablet a stretch-in-flight jelly reaction whenever [trigger]
+/// changes: it elongates toward the TRAILING edge as it travels — never
+/// smaller than its resting size, no counter-squash — then eases back once it
+/// settles. Pair with a no-overshoot position curve (easeOutCubic) so it never
+/// crosses the wall.
 class JellyStretch extends StatefulWidget {
   const JellyStretch({
     super.key,
@@ -922,17 +957,16 @@ class _JellyStretchState extends State<JellyStretch>
       animation: _c,
       builder: (context, child) {
         final t = _c.value;
-        // Flings out (stretch, trailing edge lags) then, on impact, compresses
-        // toward the wall (squish), springing back — a decaying oscillation.
-        final env = t >= 1
-            ? 0.0
-            : math.sin(t * math.pi * 2) * (1 - t) * (1 - t) * widget.amount;
+        // One hump, never negative: the tablet only elongates in the travel
+        // direction as it flies, then eases back to its normal size — no
+        // counter-squash on the other axis, no dipping smaller than 1.
+        final env = t >= 1 ? 0.0 : math.sin(t * math.pi) * widget.amount;
         final align = widget.horizontal
             ? Alignment(_dir, 0)
             : Alignment(0, _dir);
         return Transform.scale(
-          scaleX: widget.horizontal ? 1 + env : 1 - env,
-          scaleY: widget.horizontal ? 1 - env : 1 + env,
+          scaleX: widget.horizontal ? 1 + env : 1,
+          scaleY: widget.horizontal ? 1 : 1 + env,
           alignment: align,
           child: child,
         );
@@ -997,6 +1031,134 @@ class CountPill extends StatelessWidget {
               color: highlight ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
               fontWeight: FontWeight.w600,
             ),
+      ),
+    );
+  }
+}
+
+/// Text that reels between values instead of snapping: the old reading rides
+/// up and fades out while the new one rises in from below to take its place —
+/// a little odometer flip. Sizes itself to the taller/wider of the two values
+/// mid-transition, so wrap it in an [AnimatedSize] to ease the surrounding
+/// box along with it.
+class ReelText extends StatefulWidget {
+  const ReelText({
+    super.key,
+    required this.text,
+    required this.style,
+    this.alignment = Alignment.center,
+  });
+
+  final String text;
+  final TextStyle style;
+  final AlignmentGeometry alignment;
+
+  @override
+  State<ReelText> createState() => _ReelTextState();
+}
+
+class _ReelTextState extends State<ReelText> with SingleTickerProviderStateMixin {
+  // Starts settled (value 1) so the very first frame just shows the text —
+  // no phantom transition on mount.
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+    value: 1,
+  );
+  late final Animation<double> _t =
+      CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+
+  late String _shown = widget.text;
+  String? _leaving;
+
+  static const _travel = 16.0;
+
+  @override
+  void didUpdateWidget(ReelText old) {
+    super.didUpdateWidget(old);
+    if (widget.text != _shown) {
+      _leaving = _shown;
+      _shown = widget.text;
+      _c
+        ..value = 0
+        ..forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _t,
+      builder: (context, _) {
+        final t = _t.value;
+        return Stack(
+          alignment: widget.alignment,
+          children: [
+            if (_leaving != null && t < 1)
+              Opacity(
+                opacity: 1 - t,
+                child: Transform.translate(
+                  offset: Offset(0, -t * _travel),
+                  child: Text(_leaving!,
+                      style: widget.style, maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+            Opacity(
+              opacity: t,
+              child: Transform.translate(
+                offset: Offset(0, (1 - t) * _travel),
+                child: Text(_shown,
+                    style: widget.style, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A pill like [CountPill], but its text reels ([ReelText]) between values
+/// instead of snapping, and the pill eases its own width/height to match.
+/// Built for the Performance tab's frequency chips, which cycle through
+/// numbers of very different lengths as the profile changes.
+class ReelPill extends StatelessWidget {
+  const ReelPill({super.key, required this.text, this.highlight = false});
+
+  final String text;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+      decoration: BoxDecoration(
+        color: highlight ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.center,
+        child: ClipRect(
+          child: ReelText(
+            text: text,
+            style: TextStyle(
+              color: highlight ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
+        ),
       ),
     );
   }

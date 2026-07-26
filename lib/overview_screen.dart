@@ -698,27 +698,22 @@ class _SwitchStepsState extends State<_SwitchSteps> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 280),
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.35),
-            end: Offset.zero,
-          ).animate(animation),
-          child: child,
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.centerLeft,
+      child: ClipRect(
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: ReelText(
+            text: _steps[_i],
+            alignment: Alignment.centerLeft,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall!
+                .copyWith(color: scheme.onSurfaceVariant),
+          ),
         ),
-      ),
-      child: Text(
-        _steps[_i],
-        key: ValueKey(_i),
-        style: Theme.of(context)
-            .textTheme
-            .bodySmall
-            ?.copyWith(color: scheme.onSurfaceVariant),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
       ),
     );
   }
