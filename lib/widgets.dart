@@ -627,6 +627,10 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
   static const _height = 46.0;
   static const _pad = 4.0;
 
+  /// Space between one choice and the next. Wide enough that each reads as its
+  /// own chip instead of the four running together into one bar.
+  static const _gap = 3.5;
+
   late final AnimationController _c = AnimationController.unbounded(
     vsync: this,
     value: widget.values.indexOf(widget.selected).toDouble(),
@@ -717,11 +721,16 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                           Expanded(
                             child: Padding(
                               padding:
-                                  const EdgeInsets.symmetric(horizontal: 1.5),
+                                  const EdgeInsets.symmetric(horizontal: _gap),
                               child: DecoratedBox(
                                 decoration: BoxDecoration(
-                                  color: scheme.onSurface
-                                      .withValues(alpha: 0.055),
+                                  color:
+                                      scheme.onSurface.withValues(alpha: 0.06),
+                                  border: Border.all(
+                                    color: scheme.onSurface
+                                        .withValues(alpha: 0.10),
+                                    width: 1,
+                                  ),
                                   borderRadius: BorderRadius.circular(
                                       (_height - _pad * 2) / 2),
                                 ),
@@ -738,7 +747,10 @@ class _JellySegmentedState<T> extends State<JellySegmented<T>>
                       // out of both ends rather than lurching forward.
                       final stretch =
                           (_c.velocity.abs() / 26).clamp(0.0, 0.38);
-                      final w = slot * (1 + stretch);
+                      // Resting width matches a chip exactly, gaps included, so
+                      // the pill lands on one instead of straddling its
+                      // neighbours.
+                      final w = (slot - _gap * 2) * (1 + stretch);
                       final centre = _pad + slot * (_c.value + 0.5);
                       return Positioned(
                         left: centre - w / 2,
