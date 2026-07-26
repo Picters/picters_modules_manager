@@ -87,6 +87,18 @@ Interface wlan0
       expect(parseTxPowerDbm('Interface wlan0\n\ttype managed'), isNull);
     });
 
+    test('parseIfaceType reads the cfg80211 iftype, lowercased', () {
+      expect(
+        parseIfaceType('Interface wlan1\n\tifindex 42\n\ttype monitor\n'),
+        'monitor',
+      );
+      expect(parseIfaceType('\ttype managed\n\ttxpower 24.00 dBm'), 'managed');
+    });
+
+    test('parseIfaceType is null when iw prints no type line', () {
+      expect(parseIfaceType('Interface wlan1\n\twiphy 1\n'), isNull);
+    });
+
     test('parseWiphyIndex reads the "wiphy N" line from `iw dev info`', () {
       const out = 'Interface wlan1\n\tifindex 44\n\twiphy 1\n\ttype managed';
       expect(parseWiphyIndex(out), 1);

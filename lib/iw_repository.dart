@@ -33,7 +33,18 @@ class IwInfo {
     required this.txPowerDbm,
     required this.regDomain,
     required this.regDomainLocked,
+    this.type,
   });
+
+  /// The interface type cfg80211 itself reports ("monitor", "managed", ...),
+  /// null if `iw` didn't print one. This is the nl80211 view; the app's own
+  /// mode comes from the netdev's ARPHRD type in sysfs. The two normally agree,
+  /// but tooling that switches modes through the old WEXT ioctl (nexmon-era
+  /// scripts, airmon variants) moves one without the other, leaving the radio
+  /// in station mode while everything reads "monitor". Worth surfacing: in
+  /// station mode the driver can still associate, and these drivers panic on
+  /// that path.
+  final String? type;
 
   /// Current transmit power in dBm, or null if `iw` couldn't report it.
   final double? txPowerDbm;
@@ -115,6 +126,7 @@ String iwQueryScript(String iwPath, String iface) =>
 // "txpower -100.00 dBm" when the value is uninitialised/unreadable, and the
 // leading '-' (absent from the class) makes that line simply not match → null.
 final RegExp _txPowerLine = RegExp(r'txpower\s+([\d.]+)\s*dBm');
+final RegExp _typeLine = RegExp(r'^type\s+(\S+)');
 final RegExp _wiphyLine = RegExp(r'^wiphy\s+(\d+)');
 final RegExp _countryLine = RegExp(r'^country\s+([A-Za-z0-9]{2}):');
 final RegExp _phyHeader = RegExp(r'^phy#(\d+)\s*(\(self-managed\))?');
@@ -128,6 +140,16 @@ double? parseTxPowerDbm(String iwDevInfoOutput) {
       // 0..~35 dBm, so anything above that isn't a real reading.
       if (v != null && v > 0 && v <= 40) return v;
     }
+  }
+  return null;
+}
+
+/// The interface type `iw dev <iface> info` reports (the "type X" line), or
+/// null when it prints none.
+String? parseIfaceType(String iwDevInfoOutput) {
+  for (final raw in iwDevInfoOutput.split('\n')) {
+    final m = _typeLine.firstMatch(raw.trim());
+    if (m != null) return m.group(1)!.toLowerCase();
   }
   return null;
 }
@@ -188,6 +210,7 @@ IwInfo parseIwQuery(String output) {
     txPowerDbm: parseTxPowerDbm(infoPart),
     regDomain: reg.domain,
     regDomainLocked: reg.selfManaged,
+    type: parseIfaceType(infoPart),
   );
 }
 

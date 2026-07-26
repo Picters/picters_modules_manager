@@ -57,6 +57,22 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
   /// there's no region UI, it just happens under the hood so the value takes.
   bool _boSet = false;
 
+  /// The interface type cfg80211 reports, from the last `iw dev info`. The
+  /// mode tablet reflects the netdev's ARPHRD type instead; when the two
+  /// disagree the radio is not in the mode everything says it is.
+  String? _iwType;
+
+  /// True when sysfs and cfg80211 disagree about the mode — the radio is really
+  /// in station mode while the UI (and airmon-style tooling) reads "monitor",
+  /// or the reverse. Re-applying the mode is what puts them back in sync.
+  bool get _modeDesync {
+    final t = _iwType;
+    final iface = _iface;
+    if (t == null || iface == null) return false;
+    if (t != 'monitor' && t != 'managed' && t != 'station') return false;
+    return (t == 'monitor') != iface.monitor;
+  }
+
   // Optimistic targets: set the instant a toggle is tapped so the tablet slides
   // right away, and held (with the control locked) until the action finishes
   // and the real scan catches up — then cleared to reconcile with live state.
@@ -122,6 +138,7 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
     final lastSet = driver.isEmpty ? null : await _iw.lastSetTx(driver);
     if (!mounted) return;
     setState(() {
+      _iwType = info?.type;
       _stockTxDbm = stock;
       // Default the slider to the last-set value, else the recommended — never
       // the live read (it's unreliable and would fight the persisted value).
@@ -170,6 +187,26 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
       _pendingMonitor = null;
       _pendingUp = null;
     });
+    // Re-read cfg80211's own view so the desync banner reflects the new state.
+    await _load();
+  }
+
+  /// Re-applies [monitor] through the full down/set-type/up sequence even though
+  /// the app already believes the interface is in that mode — that's the point:
+  /// it drives cfg80211 back into agreement with the netdev after some other
+  /// tool moved only one of them.
+  Future<void> _resyncMode(bool monitor) async {
+    if (_busyMode) return;
+    HapticFeedback.selectionClick();
+    setState(() => _busyMode = true);
+    final r = await _iw.setMode(iface: widget.ifaceName, monitor: monitor);
+    if (mounted && !r.stdout.contains('OK_MODE')) {
+      showError(context, 'Could not re-apply the mode: ${r.errorSummary}');
+    }
+    await widget.controller.refresh();
+    if (!mounted) return;
+    setState(() => _busyMode = false);
+    await _load();
   }
 
   Future<void> _toggleLink(bool up) async {
@@ -295,6 +332,14 @@ class _AdapterConfigSheetState extends State<_AdapterConfigSheet> {
                   ),
                 ],
               ),
+              if (_modeDesync) ...[
+                const SizedBox(height: 12),
+                _ModeDesyncNote(
+                  iwType: _iwType!,
+                  busy: _busyMode,
+                  onFix: () => _resyncMode(iface.monitor),
+                ),
+              ],
               const SizedBox(height: 14),
               _SlidingToggle(
                 // Lock both toggles during any action so a mode + link change
@@ -677,4 +722,52 @@ class _TxSliderPainter extends CustomPainter {
       old.recommended != recommended ||
       old.warn != warn ||
       old.activeColor != activeColor;
+}
+
+/// Shown when cfg80211 and the netdev disagree about the interface mode — the
+/// state old nexmon-era tooling leaves behind when it switches modes through
+/// the WEXT ioctl. It matters beyond cosmetics: a radio still in station mode
+/// can associate, and that path has panicked these drivers.
+class _ModeDesyncNote extends StatelessWidget {
+  const _ModeDesyncNote({
+    required this.iwType,
+    required this.busy,
+    required this.onFix,
+  });
+
+  final String iwType;
+  final bool busy;
+  final VoidCallback onFix;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.sync_problem, size: 20, color: scheme.error),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Text(
+              'The radio reports "$iwType" — another tool changed the mode '
+              'halfway. Re-apply it to put them back in sync.',
+              style: textTheme.bodySmall
+                  ?.copyWith(color: scheme.onSurface, height: 1.3),
+            ),
+          ),
+          const SizedBox(width: 6),
+          TextButton(
+            onPressed: busy ? null : onFix,
+            child: const Text('Fix'),
+          ),
+        ],
+      ),
+    );
+  }
 }
