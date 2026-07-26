@@ -72,24 +72,21 @@ class AppBottomBar extends StatelessWidget {
               child: Stack(
                 children: [
                   // The one moving element — retargets on every rebuild, so a
-                  // second tap mid-slide redirects it instead of queueing.
+                  // second tap mid-slide redirects it instead of queueing. It
+                  // just glides: no jelly stretch here, the squish belongs to
+                  // the icons. easeOutCubic also stops AT the target, so it
+                  // never overshoots past the end cell.
                   AnimatedPositioned(
-                    // easeOutCubic stops AT the target (never past the end cell,
-                    // so it can't cross the wall); the JellyStretch squish is
-                    // what makes it "slam into" the wall instead.
                     duration: const Duration(milliseconds: 300),
                     curve: Curves.easeOutCubic,
                     top: 0,
                     bottom: 0,
                     left: _cell * index,
                     width: _cell,
-                    child: JellyStretch(
-                      trigger: index,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: scheme.secondaryContainer,
-                          borderRadius: BorderRadius.circular(_tabRadius),
-                        ),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: scheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(_tabRadius),
                       ),
                     ),
                   ),
@@ -141,7 +138,7 @@ class _IconCell extends StatelessWidget {
         selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant;
 
     // GestureDetector, not InkResponse: no white ripple/splash on the dock —
-    // the sliding tablet and the haptic tick are the feedback.
+    // the jelly press, the sliding tablet and the haptic tick are the feedback.
     return SizedBox(
       width: width,
       child: JellyTap(
