@@ -194,6 +194,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _tab.value = i;
   }
 
+  /// Brings the nav bar back in line with the page actually on screen.
+  ///
+  /// A tap moves the chip immediately — it has to feel instant — while the page
+  /// flies there over 320ms. Put a finger down during that flight and the
+  /// PageView stops and settles wherever it is, which is often the page it
+  /// started from; no page index ever changed, so onPageChanged never fires and
+  /// the chip is left pointing at a tab that was never reached. Reconciling once
+  /// everything has come to rest is what makes the two agree again.
+  void _syncTabToPage() {
+    if (!_pageController.hasClients) return;
+    final page = _pageController.page?.round();
+    if (page == null || page == _tab.value) return;
+    _tab.value = page;
+  }
+
   Future<void> _pinShortcut() async {
     HapticFeedback.lightImpact();
     final ok = await confirmAction(
@@ -239,12 +254,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           if (_hasUpdate)
             _UpdatePill(onTap: () => _showUpdateDialog(context, _controller.update)),
           if (granted)
-            Jelly(child: IconButton(
-              icon: const Icon(Icons.add_to_home_screen_outlined),
+            _SquareIconButton(
+              icon: Icons.add_to_home_screen_outlined,
               tooltip: 'Pin shortcut',
-              onPressed: _pinShortcut,
-            )),
-          const SizedBox(width: 4),
+              onTap: _pinShortcut,
+            ),
+          const SizedBox(width: 12),
         ],
       ),
       body: switch (_rootStatus) {
@@ -275,8 +290,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 onNotification: (n) {
                   if (n is ScrollStartNotification) {
                     _controller.setPollPaused(true);
+                    // depth 0 is the PageView itself; anything deeper is a
+                    // screen's own vertical list, which must not be mistaken
+                    // for the user grabbing the pager.
+                    if (n.depth == 0 && n.dragDetails != null) {
+                      // A finger landing mid-flight takes the navigation over.
+                      // Bumping the generation retires the in-flight
+                      // animateToPage callback, and dropping the programmatic
+                      // flag lets page changes drive the chip again — otherwise
+                      // the tap's target stays latched while the finger moves
+                      // the content somewhere else entirely.
+                      _navGen++;
+                      _programmaticPage = false;
+                    }
                   } else if (n is ScrollEndNotification) {
                     _controller.setPollPaused(false);
+                    if (n.depth == 0) _syncTabToPage();
                   }
                   return false;
                 },
@@ -284,6 +313,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             controller: _pageController,
             physics: const _SnappyPagePhysics(),
             onPageChanged: _onPageChanged,
+            // Sets the viewport's cacheExtent to one full page, so the
+            // neighbouring tab is built and laid out while nothing is moving.
+            // Without it the first visit to a tab builds its entire tree in the
+            // frame the gesture starts — and the Modules tree is every staged
+            // .ko, grouped — which is the stutter you only ever see once per
+            // tab, because _KeepAlive holds the result afterwards.
+            allowImplicitScrolling: true,
             // Each page in its own layer, so a swipe just translates it
             // instead of repainting both screens every frame. Kept alive so
             // leaving a tab and coming back preserves its state — expanded
@@ -356,6 +392,52 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               ),
             )
           : null,
+    );
+  }
+}
+
+/// An app-bar action drawn as a filled rounded square rather than a bare glyph.
+///
+/// A plain IconButton floats unanchored in the bar and its ripple is a circle
+/// that matches nothing else on screen; a tinted tile gives the action an
+/// edge to sit against, in the same rounded-square family as the cards below
+/// it. JellyTap supplies the press feedback, so there's no Material splash to
+/// compete with the squash.
+class _SquareIconButton extends StatelessWidget {
+  const _SquareIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Tooltip(
+        message: tooltip,
+        child: Semantics(
+          label: tooltip,
+          button: true,
+          child: JellyTap(
+            onTap: onTap,
+            child: Container(
+              width: 42,
+              height: 42,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: Icon(icon, size: 21, color: scheme.onSurfaceVariant),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

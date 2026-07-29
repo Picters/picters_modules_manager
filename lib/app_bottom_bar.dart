@@ -17,9 +17,14 @@ class BottomBarItem {
   final String label;
 }
 
-/// A floating, icon-only bottom bar. It hovers above the content (the Scaffold
-/// uses `extendBody`), is sized to its icons so there's no empty gutter, and
-/// marks the active tab with a single sliding tablet.
+/// A floating, icon-only bottom bar: a stadium-shaped dock hovering above the
+/// content (the Scaffold uses `extendBody`), sized to its icons so there's no
+/// empty gutter, with the active tab marked by a single sliding chip.
+///
+/// The chip's corners are position-dependent. At either end the outward side
+/// rounds off to match the dock's own semicircular end and the inward side
+/// stays squared, so the chip caps the bar; anywhere in between both sides are
+/// squared. The transition is continuous rather than stepped — see the builder.
 ///
 /// Why custom: Material's [NavigationBar] animates each destination's label
 /// independently, so rapid switches make the new label wait for the old pill to
@@ -40,8 +45,22 @@ class AppBottomBar extends StatelessWidget {
   static const double _cell = 60; // width per icon
   static const double _height = 56; // inner (tablet) height
   static const double _gap = 6; // padding between the tablet and the bar edge
-  static const double _barRadius = 22; // rounded-square bar, not a full stadium
-  static const double _tabRadius = 16; // rounded-square selection chip
+
+  /// Full stadium: half the bar's outer height (_height + 2 * _gap), so both
+  /// ends are true semicircles rather than merely generous corners.
+  static const double _barRadius = (_height + 2 * _gap) / 2;
+
+  /// The chip's rounded side. Half its own height — and, not by accident,
+  /// exactly `_barRadius - _gap`, which is the radius the bar's inner edge
+  /// traces. A chip parked at either end therefore nests into that end
+  /// concentrically, with the 6px gap even the whole way round the curve.
+  static const double _tabRound = _height / 2;
+
+  /// The chip's "squared" side — the rounded-rectangle corner the chip had
+  /// before the ends started morphing. Softer than a true square on purpose:
+  /// the contrast against the round side still reads clearly, and the corner
+  /// stays in the same family of shapes as the cards and buttons.
+  static const double _tabSquare = 16;
 
   @override
   Widget build(BuildContext context) {
@@ -76,19 +95,45 @@ class AppBottomBar extends StatelessWidget {
                   // just glides: no jelly stretch here, the squish belongs to
                   // the icons. easeOutCubic also stops AT the target, so it
                   // never overshoots past the end cell.
-                  AnimatedPositioned(
+                  //
+                  // Animating the *index* as a continuous value (rather than
+                  // AnimatedPositioned over the offset) is what lets the corners
+                  // morph in step with the travel: position and radii are both
+                  // derived from the same number, so the chip is already
+                  // un-rounding as it leaves an end instead of popping shape
+                  // once it arrives.
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(end: index.toDouble()),
                     duration: const Duration(milliseconds: 300),
                     curve: Curves.easeOutCubic,
-                    top: 0,
-                    bottom: 0,
-                    left: _cell * index,
-                    width: _cell,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: scheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(_tabRadius),
-                      ),
-                    ),
+                    builder: (context, pos, _) {
+                      // How far into an end cell the chip currently sits, 1 at
+                      // the end and 0 by the time it reaches its neighbour.
+                      final atLeft = (1 - pos).clamp(0.0, 1.0);
+                      final atRight = (pos - (n - 2)).clamp(0.0, 1.0);
+                      double radius(double t) =>
+                          _tabSquare + (_tabRound - _tabSquare) * t;
+                      return Positioned(
+                        top: 0,
+                        bottom: 0,
+                        left: _cell * pos,
+                        width: _cell,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: scheme.secondaryContainer,
+                            // Only the side facing an end goes round; the side
+                            // facing the rest of the bar stays squared, so the
+                            // chip reads as capping the bar there rather than
+                            // floating inside it. In the middle both sides are
+                            // squared and it's a plain block.
+                            borderRadius: BorderRadius.horizontal(
+                              left: Radius.circular(radius(atLeft)),
+                              right: Radius.circular(radius(atRight)),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                   // Positioned.fill so the cells span the bar's full height and
                   // centre their icons, instead of pinning to the Stack's top.
