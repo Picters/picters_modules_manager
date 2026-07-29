@@ -62,6 +62,8 @@ List<WifiInterface> parseIfaceLines(Iterable<String> lines) {
       driver: f.length > 1 ? f[1].trim() : '',
       up: f.length > 2 && ifaceFlagUp(f[2]),
       monitor: f.length > 3 && f[3].trim() == '803',
+      usbPath: f.length > 4 ? f[4].trim() : '',
+      mac: f.length > 5 ? f[5].trim() : '',
     ));
   }
   return out;

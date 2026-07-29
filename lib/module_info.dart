@@ -42,6 +42,8 @@ class WifiInterface {
     required this.driver,
     required this.up,
     required this.monitor,
+    this.usbPath = '',
+    this.mac = '',
   });
 
   /// Interface name, e.g. "wlan0", "wlan1".
@@ -55,6 +57,15 @@ class WifiInterface {
 
   /// ARPHRD type is radiotap (802.11 monitor) rather than plain ether.
   final bool monitor;
+
+  /// The sysfs USB device dir this netdev belongs to, e.g. "1-1.2" — matches
+  /// [UsbDevice.sysfsName]. Empty for a non-USB radio (the built-in chip) or if
+  /// the link couldn't be resolved.
+  final String usbPath;
+
+  /// The netdev's hardware address, "00:c0:ca:xx:yy:zz". Its OUI is the only
+  /// reliable trace of who actually made the adapter — see [vendorFromMac].
+  final String mac;
 }
 
 /// Everything one root scan gathers, in one immutable snapshot.

@@ -7,6 +7,7 @@ import 'adapter_panel.dart';
 import 'app_controller.dart';
 import 'module_info.dart';
 import 'theme.dart';
+import 'tx_profiles.dart';
 import 'usb_devices.dart';
 import 'widgets.dart';
 
@@ -152,6 +153,11 @@ class OverviewScreen extends StatelessWidget {
                 .compareTo(b.device.displayName.toLowerCase());
           });
 
+        // Resolved once for the whole list rather than per row: the pairing has
+        // to know which interfaces are already spoken for, which a per-row
+        // lookup cannot.
+        final ifaces = resolveAdapterInterfaces(devices, state.interfaces);
+
         return PolygonScrollView(
           onRefresh: controller.refresh,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
@@ -203,8 +209,7 @@ class OverviewScreen extends StatelessWidget {
                                     adapter: devices[i],
                                     state: state,
                                     iface: devices[i].recognized
-                                        ? matchingIface(
-                                            devices[i], state.interfaces)
+                                        ? ifaces[i]
                                         : null,
                                     controller: controller,
                                     busy: devices[i].recognized &&
@@ -777,16 +782,85 @@ class _HeroIcon extends StatelessWidget {
   }
 }
 
-/// The live netdev an adapter's driver exposes (e.g. `wlan0`), matched by
-/// bound driver name — null while the driver isn't loaded/hasn't brought an
-/// interface up yet. Shared by the row's status label and its tap target.
-WifiInterface? matchingIface(DetectedAdapter adapter, List<WifiInterface> interfaces) {
-  final driver = adapter.device.driver;
-  if (driver.isEmpty) return null;
-  for (final i in interfaces) {
-    if (i.driver.isNotEmpty && i.driver == driver) return i;
+/// Pairs each adapter with its own live netdev, returned parallel to
+/// [adapters] (null where none is up yet).
+///
+/// Matching on the driver name alone breaks the moment two identical sticks are
+/// plugged in: they bind the same driver, so every row resolved to whichever
+/// netdev came first — both rows read `wlan0`, and downing one appeared to down
+/// the other. The USB device path is the real discriminator, since two devices
+/// can share a model but never a port.
+///
+/// Two passes, and an interface is claimed by at most one adapter: exact port
+/// match first, then driver name for whatever is left over (a radio whose sysfs
+/// link couldn't be resolved). Claiming is what guarantees that even in the
+/// fallback two adapters can never end up showing the same interface.
+List<WifiInterface?> resolveAdapterInterfaces(
+  List<DetectedAdapter> adapters,
+  List<WifiInterface> interfaces,
+) {
+  final out = List<WifiInterface?>.filled(adapters.length, null);
+  final claimed = <String>{};
+
+  for (var i = 0; i < adapters.length; i++) {
+    final usb = adapters[i].device.sysfsName;
+    if (usb.isEmpty) continue;
+    for (final n in interfaces) {
+      if (n.usbPath.isEmpty || n.usbPath != usb) continue;
+      if (!claimed.add(n.name)) continue;
+      out[i] = n;
+      break;
+    }
   }
-  return null;
+
+  for (var i = 0; i < adapters.length; i++) {
+    if (out[i] != null) continue;
+    final driver = adapters[i].device.driver;
+    if (driver.isEmpty) continue;
+    for (final n in interfaces) {
+      if (n.driver.isEmpty || n.driver != driver) continue;
+      if (!claimed.add(n.name)) continue;
+      out[i] = n;
+      break;
+    }
+  }
+
+  return out;
+}
+
+/// The best name we can honestly put on an adapter row.
+///
+/// The USB product string is usually the chipset vendor's stock text ("802.11n
+/// NIC"), which names nothing. Two better sources exist, in this order:
+///
+///  1. The VID:PID table, when the brand took its own USB IDs — that yields a
+///     real product ("TP-Link Archer T4U V3"). Entries ending in "(default)"
+///     are the chipset's own reference IDs and name no brand, so they don't
+///     count as a match.
+///  2. The MAC OUI, which survives even on rebadged reference designs. This is
+///     the only thing that identifies an Alfa on a Realtek chipset, since those
+///     ship with Realtek's stock USB IDs.
+///
+/// Falls back to whatever the descriptor said. Deliberately never guesses a
+/// model from a chipset: several Alfa models share one chip and one OUI, so
+/// "ALFA RTL8812AU" is the truthful limit — printing "AWUS036ACH" would be
+/// inventing detail the hardware never reported.
+String adapterTitle(DetectedAdapter adapter, WifiInterface? iface) {
+  final label = adapter.match?.label;
+  if (label != null && !label.contains('(default)')) return label;
+
+  final vendor = iface == null ? null : vendorFromMac(iface.mac);
+  final chip = txProfileFor(
+    '${adapter.match?.label ?? ''} ${adapter.device.driver} ${iface?.driver ?? ''}',
+  ).chip;
+  // "Realtek" here means the stock reference OUI — an unbranded stick. Naming
+  // the chipset alone is more useful than saying "Realtek RTL8812AU" twice.
+  if (vendor != null && vendor != 'Realtek' && chip != 'Adapter') {
+    return '$vendor $chip';
+  }
+  if (vendor != null && vendor != 'Realtek') return vendor;
+  if (chip != 'Adapter') return chip;
+  return adapter.device.displayName;
 }
 
 class _AdapterRow extends StatefulWidget {
@@ -871,11 +945,24 @@ class _AdapterRowState extends State<_AdapterRow> {
         child: const Text('Load'),
       ));
     } else if (inSystem) {
-      // With an interface the chevron alone carries the row: the name is
-      // already the first thing the unfolded panel says, so a tablet repeating
-      // it just crowds the edge.
+      // Once the driver has brought an interface up, the tablet carries its
+      // name — the spinner the Load button turns into resolves straight into
+      // it, in the same spot, so the row answers "which netdev is this?"
+      // without having to be unfolded. Telling wlan0 from wlan1 at a glance is
+      // the whole point with two adapters plugged in.
+      // The tablet doubles as the link indicator: it carries the interface name
+      // in the live colour while the netdev is admin-up, and turns to the error
+      // colour the moment it goes down — so a downed adapter reads as a problem
+      // from the list, without unfolding the row to check. The key stays the
+      // same across that change on purpose: the switcher shouldn't re-animate,
+      // the tablet should just change colour under the name.
       trailing = iface != null
-          ? const SizedBox.shrink(key: ValueKey('iface'))
+          ? _StatusTablet(
+              key: const ValueKey('iface'),
+              label: iface.name,
+              bg: iface.up ? scheme.tertiaryContainer : scheme.errorContainer,
+              fg: iface.up ? scheme.onTertiaryContainer : scheme.onErrorContainer,
+            )
           : _StatusTablet(
               key: const ValueKey('active'),
               label: loaded ? 'Loaded' : 'Active',
@@ -912,7 +999,12 @@ class _AdapterRowState extends State<_AdapterRow> {
           size: 20,
         ),
       ),
-      title: Text(device.displayName, overflow: TextOverflow.ellipsis),
+      title: Text(
+        adapter.recognized
+            ? adapterTitle(adapter, iface)
+            : device.displayName,
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Text(
         driverName.isNotEmpty
             ? '${device.idPair} · $driverName'
@@ -921,41 +1013,33 @@ class _AdapterRowState extends State<_AdapterRow> {
         overflow: TextOverflow.ellipsis,
       ),
       trailing: SizedBox(
-        // Just the chevron once there's an interface — no tablet to fit.
-        width: iface == null ? 88 : 28,
-        // Centre both the spinner and the resting controls in the box so the busy
-        // spinner morphs into the iface tablet at the same centre — no sideways jump.
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 280),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: ScaleTransition(
-                    scale: Tween<double>(begin: 0.85, end: 1.0).animate(animation),
-                    child: child,
-                  ),
-                ),
-                child: trailing,
+        // One width for every state, so Load → spinner → interface tablet all
+        // occupy the same box and nothing shifts sideways as the row settles.
+        width: 88,
+        // Centred, NOT end-aligned. AnimatedSwitcher stacks the outgoing and
+        // incoming child, so its own width is max(both) mid-transition and snaps
+        // to the survivor's width the instant the old one is dropped. Against a
+        // right edge that snap threw the spinner sideways on the last frame;
+        // centred, every child shares the box's centre and the width can change
+        // under them without moving anything.
+        child: Center(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 280),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.85, end: 1.0).animate(animation),
+                child: child,
               ),
             ),
-            // The affordance that the row opens in place rather than going
-            // somewhere — only drawn when there is something to unfold.
-            if (iface != null)
-              AnimatedRotation(
-                turns: _expanded ? 0.5 : 0,
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutCubic,
-                child: Icon(Icons.keyboard_arrow_down,
-                    size: 20, color: scheme.onSurfaceVariant),
-              ),
-          ],
+            child: trailing,
+          ),
         ),
+        // No chevron: the row itself is the tap target and the jelly squash is
+        // the feedback, so a separate arrow only added a second thing pointing
+        // at what the whole row already does.
       ),
     );
 
@@ -1033,15 +1117,23 @@ class _StatusTablet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // Animated rather than a plain Container: the interface tablet swaps its
+    // colours in place when the link goes up or down, and a hard snap there
+    // read as a glitch next to everything else in the row easing.
+    const duration = Duration(milliseconds: 240);
+    return AnimatedContainer(
+      duration: duration,
+      curve: Curves.easeOutCubic,
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(
-        label,
+      child: AnimatedDefaultTextStyle(
+        duration: duration,
+        curve: Curves.easeOutCubic,
         style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 13),
+        child: Text(label),
       ),
     );
   }

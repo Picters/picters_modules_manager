@@ -7,6 +7,7 @@ class UsbDevice {
     required this.product,
     this.deviceClass = '',
     this.driver = '',
+    this.sysfsName = '',
   });
 
   /// Lowercase 4-hex-digit strings, e.g. "0bda" — as sysfs already reports them.
@@ -23,6 +24,11 @@ class UsbDevice {
   /// "btusb", "cdc_acm", "88XXau"), or empty if nothing is bound — meaning the
   /// device is present but no driver in the running kernel claims it.
   final String driver;
+
+  /// The sysfs USB device directory name, e.g. "1-1.2" — effectively which port
+  /// the device is plugged into. Unique per attached device even when two of
+  /// them are the same model, which VID:PID and driver name are not.
+  final String sysfsName;
 
   String get idPair => '$vendorId:$productId';
 
@@ -216,7 +222,7 @@ const String usbScanFragment =
     'for i in "\${d}"*:*/; do '
     'if [ -L "\${i}driver" ]; then drv=\$(basename "\$(readlink "\${i}driver")"); break; fi; '
     'done; '
-    'echo "$usbMarker\$(cat "\${d}idVendor" 2>/dev/null)|\$(cat "\${d}idProduct" 2>/dev/null)|\$(cat "\${d}manufacturer" 2>/dev/null)|\$(cat "\${d}product" 2>/dev/null)|\$(cat "\${d}bDeviceClass" 2>/dev/null)|\${drv}"; '
+    'echo "$usbMarker\$(cat "\${d}idVendor" 2>/dev/null)|\$(cat "\${d}idProduct" 2>/dev/null)|\$(cat "\${d}manufacturer" 2>/dev/null)|\$(cat "\${d}product" 2>/dev/null)|\$(cat "\${d}bDeviceClass" 2>/dev/null)|\${drv}|\$(basename "\$d")"; '
     'fi; done';
 
 /// Shell fragment that lists every live wireless netdev (a `phy80211` dir under
@@ -235,8 +241,41 @@ const String ifaceScanFragment =
     'ifn=\$(basename "\$n"); '
     'drv=""; '
     'if [ -L "\${n}device/driver" ]; then drv=\$(basename "\$(readlink "\${n}device/driver")"); fi; '
-    'echo "$ifaceMarker\${ifn}|\${drv}|\$(cat "\${n}flags" 2>/dev/null)|\$(cat "\${n}type" 2>/dev/null)"; '
+    // The USB device this netdev hangs off. `device` points at the USB
+    // *interface* dir (e.g. .../1-1.2:1.0), whose parent is the device dir
+    // (1-1.2) — the same token the USB scan reports. Two identical sticks share
+    // a driver name but never a port, so this is what tells them apart.
+    'usb=""; '
+    'if [ -L "\${n}device" ]; then usb=\$(basename "\$(dirname "\$(readlink -f "\${n}device")")"); fi; '
+    'echo "$ifaceMarker\${ifn}|\${drv}|\$(cat "\${n}flags" 2>/dev/null)|\$(cat "\${n}type" 2>/dev/null)|\${usb}|\$(cat "\${n}address" 2>/dev/null)"; '
     'done';
+
+/// Manufacturer prefixes (OUIs) for the radios that actually turn up on this
+/// kind of hardware. Deliberately tiny: an adapter's USB descriptor is usually
+/// the chipset vendor's stock string ("802.11n NIC"), and most brands in this
+/// space rebadge reference designs without taking their own USB IDs — but they
+/// do burn their own OUI into the EEPROM, so the MAC is the one place the real
+/// make survives.
+///
+/// Only entries worth staking a name on belong here. Labelling somebody's
+/// adapter with the wrong make is worse than leaving it as the chipset, so
+/// anything uncertain is left out rather than guessed at.
+const Map<String, String> kMacVendors = <String, String>{
+  // Alfa Network — the AWUS line (036AC / 036ACH / 036NHA …). None of the
+  // Realtek-based ones carry an Alfa USB ID, so this is the only signal.
+  '00:c0:ca': 'ALFA',
+  // Realtek's own reference OUI: what an unbranded stick ships with, i.e. a
+  // positive signal that there is NO brand to name.
+  '00:e0:4c': 'Realtek',
+};
+
+/// The make behind a netdev's MAC, or null when the prefix isn't one we're
+/// prepared to name. [mac] is the plain sysfs form, "00:c0:ca:xx:yy:zz".
+String? vendorFromMac(String mac) {
+  final m = mac.trim().toLowerCase();
+  if (m.length < 8) return null;
+  return kMacVendors[m.substring(0, 8)];
+}
 
 /// Parses the lines produced by [usbScanFragment] (already split on '\n') into
 /// matched [DetectedAdapter]s.
@@ -257,6 +296,7 @@ List<DetectedAdapter> parseUsbLines(Iterable<String> lines) {
       product: fields.length > 3 ? fields[3].trim() : '',
       deviceClass: fields.length > 4 ? fields[4].trim().toLowerCase() : '',
       driver: fields.length > 5 ? fields[5].trim() : '',
+      sysfsName: fields.length > 6 ? fields[6].trim() : '',
     );
     KnownAdapter? match;
     for (final k in kKnownAdapters) {
