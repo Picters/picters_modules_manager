@@ -6,6 +6,7 @@ import 'iw_repository.dart';
 import 'module_dependencies.dart';
 import 'module_info.dart';
 import 'module_repository.dart';
+import 'pending_op.dart';
 import 'perf_controller.dart';
 import 'root_shell.dart';
 import 'settings_controller.dart';
@@ -62,6 +63,109 @@ class AppController extends ChangeNotifier {
   bool wifiBusy = false;
   final Set<String> moduleBusy = {};
 
+  // ── Surviving a kill mid-action ─────────────────────────────────────────
+
+  final PendingOpStore _pendingOps = PendingOpStore();
+
+  /// Set only while a restored action is being watched — i.e. the app was
+  /// killed while a switch/reconfigure/load was running and this run is
+  /// finding out how it ended. Drives the resumed banner; the ordinary busy
+  /// flags are mirrored from it so every existing loader comes back untouched.
+  PendingOp? pendingOp;
+
+  /// Records the intent before the root command goes out, so a kill between
+  /// here and the reply leaves evidence behind.
+  Future<void> _beginOp(PendingKind kind, String target, Duration timeout) =>
+      _pendingOps.write(PendingOp(
+        kind: kind,
+        target: target,
+        startedAt: DateTime.now(),
+        timeout: timeout,
+      ));
+
+  /// The command came back — nothing to recover.
+  Future<void> _endOp() => _pendingOps.clear();
+
+  /// Puts the spinner back for an action that was running when the app died,
+  /// then watches the live state until it shows the action landed (or its own
+  /// timeout runs out). Called once, after root is granted.
+  Future<void> _restorePendingOp() async {
+    final op = await _pendingOps.read();
+    if (op == null || _disposed) return;
+    if (op.expiredAt(DateTime.now())) {
+      // Too old to still be running — clear it rather than showing a spinner
+      // for something that finished, or failed, long ago.
+      await _pendingOps.clear();
+      return;
+    }
+    pendingOp = op;
+    // Mirror onto the flags the screens already read, so each loader reappears
+    // exactly where the user left it without any screen knowing about this.
+    switch (op.kind) {
+      case PendingKind.wifiStock:
+        wifiBusy = true;
+        optimisticWifiMode = WifiMode.stock;
+      case PendingKind.wifiInject:
+        wifiBusy = true;
+        optimisticWifiMode = WifiMode.inject;
+      case PendingKind.reconfigure:
+        reconfiguring = true;
+      case PendingKind.moduleLoad:
+        moduleBusy.add(op.target);
+        optimisticModuleLoaded[op.target] = true;
+      case PendingKind.moduleUnload:
+        moduleBusy.add(op.target);
+        optimisticModuleLoaded[op.target] = false;
+    }
+    notifyListeners();
+    await _watchPendingOp(op);
+  }
+
+  /// Scans directly rather than going through [_pollOnce] — the busy flags this
+  /// just set are exactly what makes that early-return, and the whole point is
+  /// to keep looking while they're up.
+  Future<void> _watchPendingOp(PendingOp op) async {
+    while (!_disposed && !op.expiredAt(DateTime.now())) {
+      try {
+        final next = await _repo.scan();
+        if (_disposed) return;
+        state = next;
+        _lastFingerprint = next.fingerprint;
+        notifyListeners();
+        if (op.isSatisfiedBy(next)) break;
+      } catch (_) {
+        // Transient — the loop retries until the deadline.
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    if (_disposed) return;
+    await _clearPendingOp();
+  }
+
+  /// Drops the restored action and every flag it put up, whether it landed or
+  /// timed out — either way the app stops claiming something is in flight.
+  Future<void> _clearPendingOp() async {
+    final op = pendingOp;
+    pendingOp = null;
+    if (op != null) {
+      switch (op.kind) {
+        case PendingKind.wifiStock:
+        case PendingKind.wifiInject:
+          wifiBusy = false;
+          optimisticWifiMode = null;
+        case PendingKind.reconfigure:
+          reconfiguring = false;
+        case PendingKind.moduleLoad:
+        case PendingKind.moduleUnload:
+          moduleBusy.remove(op.target);
+          optimisticModuleLoaded.remove(op.target);
+      }
+    }
+    await _pendingOps.clear();
+    notifyListeners();
+    await _pollOnce(force: true);
+  }
+
   Timer? _timer;
   bool _foreground = true;
   bool _polling = false;
@@ -86,6 +190,9 @@ class AppController extends ChangeNotifier {
       unawaited(iw.preloadTx());
       await _pollOnce(force: true);
       _startTimer();
+      // After the first scan, so a resumed action is judged against real state
+      // rather than the empty placeholder.
+      unawaited(_restorePendingOp());
       unawaited(update.init());
       unawaited(perf.init());
       unawaited(_checkKernelAuthentic());
@@ -194,7 +301,11 @@ class AppController extends ChangeNotifier {
   Future<void> _pollOnce({bool force = false}) async {
     if (!_foreground && !force) return;
     if (_pollPaused && !force) return;
-    if (_polling || wifiBusy || moduleBusy.isNotEmpty) return;
+    // A restored action drives its own scan loop; letting the timer scan too
+    // would just duplicate every round-trip for the length of the resume.
+    if (_polling || wifiBusy || moduleBusy.isNotEmpty || pendingOp != null) {
+      return;
+    }
     _polling = true;
     try {
       final next = await _repo.scan();
@@ -247,6 +358,13 @@ class AppController extends ChangeNotifier {
     optimisticWifiMode = target;
     lastSwitchNeedsReboot = false;
     notifyListeners();
+    // Recorded before the command goes out: the HAL/wificond bounce takes tens
+    // of seconds, which is ample time for a backgrounded app to be killed.
+    await _beginOp(
+      target == WifiMode.stock ? PendingKind.wifiStock : PendingKind.wifiInject,
+      '',
+      const Duration(seconds: 90),
+    );
     String? error;
     try {
       if (target == WifiMode.stock) {
@@ -275,6 +393,7 @@ class AppController extends ChangeNotifier {
     } catch (e) {
       error = 'Error: $e';
     } finally {
+      await _endOp();
       wifiBusy = false;
       optimisticWifiMode = null;
       await _pollOnce(force: true);
@@ -316,6 +435,11 @@ class AppController extends ChangeNotifier {
     moduleErrors.remove(module.name); // clear any prior error when retried
     optimisticModuleLoaded[module.name] = want;
     notifyListeners();
+    await _beginOp(
+      want ? PendingKind.moduleLoad : PendingKind.moduleUnload,
+      module.name,
+      const Duration(seconds: 45),
+    );
     String? error;
     try {
       final result = await _repo.setLoaded(module, want);
@@ -335,6 +459,7 @@ class AppController extends ChangeNotifier {
     } catch (e) {
       error = 'Error: $e';
     } finally {
+      await _endOp();
       if (error != null) moduleErrors[module.name] = error;
       moduleBusy.remove(module.name);
       optimisticModuleLoaded.remove(module.name);
@@ -353,6 +478,11 @@ class AppController extends ChangeNotifier {
     moduleErrors.remove(module.name);
     optimisticModuleLoaded[module.name] = true;
     notifyListeners();
+    await _beginOp(
+      PendingKind.moduleLoad,
+      module.name,
+      const Duration(seconds: 50),
+    );
     String? error;
     try {
       final r = await _repo.enableRndisHost();
@@ -367,6 +497,7 @@ class AppController extends ChangeNotifier {
       error = 'Error: $e';
       moduleErrors[module.name] = error;
     } finally {
+      await _endOp();
       moduleBusy.remove(module.name);
       moduleBusy.remove(ce);
       optimisticModuleLoaded.remove(module.name);
@@ -448,6 +579,11 @@ class AppController extends ChangeNotifier {
       optimisticModuleLoaded[n] = load;
     }
     notifyListeners();
+    await _beginOp(
+      load ? PendingKind.moduleLoad : PendingKind.moduleUnload,
+      primary,
+      Duration(seconds: 30 + 10 * ordered.length),
+    );
     String? error;
     try {
       final result =
@@ -465,6 +601,7 @@ class AppController extends ChangeNotifier {
       error = 'Error: $e';
       moduleErrors[primary] = error;
     } finally {
+      await _endOp();
       for (final n in names) {
         moduleBusy.remove(n);
         optimisticModuleLoaded.remove(n);
@@ -611,6 +748,11 @@ class AppController extends ChangeNotifier {
 
     reconfiguring = true;
     notifyListeners();
+    await _beginOp(
+      PendingKind.reconfigure,
+      targetName,
+      const Duration(seconds: 60),
+    );
     String? error;
     try {
       final r = await _repo.reconfigureManaged(
@@ -624,6 +766,7 @@ class AppController extends ChangeNotifier {
     } catch (e) {
       error = 'Error: $e';
     } finally {
+      await _endOp();
       reconfiguring = false;
       // Broadcast immediately — don't rely on _pollOnce to clear the button's
       // loader, since it early-returns when a periodic poll is already in flight
