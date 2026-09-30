@@ -124,7 +124,7 @@ class PendingOp {
 
 /// Reads and writes the single pending-action marker in the app's own private
 /// files dir — plain Dart file I/O, no root involved, the same place the
-/// updater keeps its reboot marker.
+/// manager stores its settings.
 class PendingOpStore {
   Future<File?> _file() async {
     final dir = await NativeBridge.filesDir();

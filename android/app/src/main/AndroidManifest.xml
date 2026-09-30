@@ -1,7 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <!-- Self-update check against GitHub Releases — independent of the
-         kernel OOT-modules zip release cadence, see update_checker.dart. -->
+    <!-- Read-only GitHub release notices; installation is always manual. -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
     <application

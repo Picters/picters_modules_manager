@@ -29,6 +29,15 @@ class NativeBridge {
     }
   }
 
+  /// Opens GitHub in the user's browser. Downloads and flashing are manual.
+  static Future<bool> openKernelReleases() async {
+    try {
+      return await _channel.invokeMethod<bool>('openKernelReleases') ?? false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   /// Opens the installed root manager (KernelSU / APatch / Magisk) so the user
   /// can grant Superuser access without hunting for the app. Returns false if
   /// none of the known managers is installed.

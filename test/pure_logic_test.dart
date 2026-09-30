@@ -4,33 +4,9 @@ import 'package:picters_modules_manager/module_categories.dart';
 import 'package:picters_modules_manager/module_info.dart';
 import 'package:picters_modules_manager/module_repository.dart';
 import 'package:picters_modules_manager/root_shell.dart';
-import 'package:picters_modules_manager/update_checker.dart';
 import 'package:picters_modules_manager/usb_devices.dart';
 
 void main() {
-  group('isNewerVersion', () {
-    test('numeric ordering, including multi-digit segments', () {
-      expect(isNewerVersion('1.10.0', '1.9.9'), isTrue);
-      expect(isNewerVersion('1.0.1', '1.0.0'), isTrue);
-      expect(isNewerVersion('2.0', '1.9'), isTrue);
-      expect(isNewerVersion('1.0.0', '1.0.1'), isFalse);
-    });
-
-    test('equal versions are not newer', () {
-      expect(isNewerVersion('1.2.3', '1.2.3'), isFalse);
-    });
-
-    test('trailing zeros compare equal across lengths', () {
-      expect(isNewerVersion('1.2.0', '1.2'), isFalse);
-      expect(isNewerVersion('1.2.1', '1.2'), isTrue);
-    });
-
-    test('non-numeric parts fall back to string inequality', () {
-      expect(isNewerVersion('1.2.0-beta', '1.2.0'), isTrue);
-      expect(isNewerVersion('1.2.0', '1.2.0'), isFalse);
-    });
-  });
-
   group('parseUsbLines', () {
     test('recognises a known adapter and maps it to its driver', () {
       final r = parseUsbLines(['${usbMarker}0bda|8812|Realtek|RTL8812AU']);
@@ -183,33 +159,4 @@ void main() {
     });
   });
 
-  group('isSafeAssetName', () {
-    test('accepts the real date-stamped release asset names', () {
-      expect(isSafeAssetName('Picters-OOT-Modules-20260719-2228.zip'), isTrue);
-      expect(isSafeAssetName('Picters-Kernel-peach-20260719-2228.zip'), isTrue);
-      expect(isSafeAssetName('app-release.apk'), isTrue);
-      expect(isSafeAssetName('build_1.1.5+5.zip'), isTrue);
-    });
-
-    test('rejects shell-injection and path-traversal attempts', () {
-      expect(isSafeAssetName("k';reboot;'.zip"), isFalse); // quote break-out
-      expect(isSafeAssetName(r'k$(reboot).zip'), isFalse); // command sub
-      expect(isSafeAssetName('k`reboot`.zip'), isFalse); // backtick sub
-      expect(isSafeAssetName('../../evil.zip'), isFalse); // slash / traversal
-      expect(isSafeAssetName('a b.zip'), isFalse); // whitespace
-      expect(isSafeAssetName(''), isFalse); // empty
-    });
-  });
-
-  group('hasApkMagic', () {
-    test('accepts the ZIP/APK local-file-header magic', () {
-      expect(hasApkMagic([0x50, 0x4B, 0x03, 0x04, 0x00]), isTrue);
-    });
-
-    test('rejects other content and short buffers', () {
-      expect(hasApkMagic([0x3C, 0x21, 0x44, 0x4F]), isFalse); // "<!DO" (HTML)
-      expect(hasApkMagic([0x50, 0x4B]), isFalse);
-      expect(hasApkMagic(const []), isFalse);
-    });
-  });
 }

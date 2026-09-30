@@ -13,7 +13,6 @@ import 'overview_screen.dart';
 import 'performance_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
-import 'update_controller.dart';
 import 'widgets.dart';
 
 class AppShell extends StatefulWidget {
@@ -71,8 +70,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _controller.addListener(_handleControllerChanged);
-    // The update pill lives on its own notifier now, so watch it too.
-    _controller.update.addListener(_handleControllerChanged);
+    // Release notices have their own notifier.
+    _controller.releases.addListener(_handleControllerChanged);
     _controller.settings.addListener(_handleSettingsChanged);
     _controller.init();
     _usbSub = NativeBridge.usbEvents().listen((_) {
@@ -85,7 +84,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _usbSub?.cancel();
     _controller.removeListener(_handleControllerChanged);
-    _controller.update.removeListener(_handleControllerChanged);
+    _controller.releases.removeListener(_handleControllerChanged);
     _controller.settings.removeListener(_handleSettingsChanged);
     _pageController.dispose();
     _tab.dispose();
@@ -94,9 +93,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _handleControllerChanged() {
-    final hasUpdate = _controller.update.anyUpdateAvailable;
+    final hasUpdate = _controller.releases.newReleaseAvailable;
     final onPicters = _controller.onPictersKernel;
-    final deviceSupported = _controller.update.deviceSupported;
+    final deviceSupported = _controller.releases.deviceSupported;
     if (_controller.rootStatus != _rootStatus ||
         hasUpdate != _hasUpdate ||
         onPicters != _onPictersKernel ||
@@ -252,7 +251,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             : const Text('Modules Manager'),
         actions: [
           if (_hasUpdate)
-            _UpdatePill(onTap: () => _showUpdateDialog(context, _controller.update)),
+            _ReleasePill(onTap: () => _openReleases(context)),
+          if (!_hasUpdate)
+            _SquareIconButton(
+              icon: Icons.open_in_new,
+              tooltip: 'GitHub releases · manual installation',
+              onTap: () => _openReleases(context),
+            ),
           if (granted)
             _SquareIconButton(
               icon: Icons.add_to_home_screen_outlined,
@@ -280,8 +285,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         // animate) — a mid-transition rebuild is what stalled the animation.
         RootStatus.granted => Column(
           children: [
-            // Standing notice on hardware this build isn't for — updates are
-            // disabled there (an sm8850 kernel would brick a different device).
+            // Identify hardware this kernel/module pack is built for.
             if (!_deviceSupported) const _UnsupportedDeviceBanner(),
             // Standing warning strip on a foreign (non-Picters) kernel.
             if (!_onPictersKernel) const _KernelWarningBanner(),
@@ -523,329 +527,28 @@ class _RootDenied extends StatelessWidget {
   }
 }
 
-/// One labelled changelog block in the update dialog.
-class _NotesSection extends StatelessWidget {
-  const _NotesSection({required this.title, required this.body});
-
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: textTheme.titleSmall),
-        const SizedBox(height: 6),
-        Text(
-          body,
-          style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-        ),
-      ],
+Future<void> _openReleases(BuildContext context) async {
+  final opened = await NativeBridge.openKernelReleases();
+  if (!opened && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open GitHub. Open Picters kernel releases in your browser.')),
     );
   }
 }
 
-/// Tidies one release body for display: drops a leading markdown "What's
-/// Changed" heading so it doesn't echo the section title above it. Null when
-/// there's nothing left to show.
-String? _releaseNotes(String? body) {
-  final text = (body ?? '')
-      .trim()
-      .replaceFirst(
-          RegExp(r"^#+\s*What.?s Changed\s*", caseSensitive: false), '')
-      .trim();
-  return text.isEmpty ? null : text;
-}
-
-/// One combined update sheet for everything — the app APK and/or the kernel +
-/// OOT-modules build. A single Install downloads each (a bar per artifact),
-/// installs them (x/y), then prompts a reboot to activate the modules.
-void _showUpdateDialog(BuildContext context, UpdateController controller) {
-  if (!controller.anyUpdateAvailable) return;
-
-  showDialog<void>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogCtx) => AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) {
-        final scheme = Theme.of(context).colorScheme;
-        final textTheme = Theme.of(context).textTheme;
-        final phase = controller.updatePhase;
-        final busy = controller.combinedUpdateBusy;
-        final app = controller.availableUpdate;
-        final kern = controller.kernelUpdateAvailable
-            ? controller.availableKernelUpdate
-            : null;
-
-        final Widget content;
-        final List<Widget> actions;
-
-        if (busy) {
-          content = Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                phase == UpdatePhase.installing
-                    ? 'Installing ${controller.installedCount}/${controller.updateTasks.length}…'
-                    : 'Downloading…',
-                style: textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 14),
-              for (final t in controller.updateTasks)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _TaskProgress(
-                    task: t,
-                    installing: phase == UpdatePhase.installing,
-                  ),
-                ),
-            ],
-          );
-          actions = const [];
-        } else if (phase == UpdatePhase.error) {
-          content = Text(controller.combinedUpdateError ?? 'Update failed.');
-          actions = [
-            Jelly(child: TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Close'),
-            )),
-            Jelly(child: FilledButton(
-              onPressed: () => controller.installAllUpdates(),
-              child: const Text('Retry'),
-            )),
-          ];
-        } else if (controller.rebootPending) {
-          // Persisted across app restarts until the actual reboot (boot_id).
-          content = Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final t in controller.updateTasks)
-                _TaskLine(label: t.label, done: t.installed),
-              if (controller.updateTasks.isNotEmpty)
-                const SizedBox(height: 12),
-              Text('Installed. Reboot to activate the kernel modules.',
-                  style: textTheme.bodyMedium),
-            ],
-          );
-          actions = [
-            Jelly(child: TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Later'),
-            )),
-            Jelly(child: FilledButton.icon(
-              onPressed: () => controller.rebootForUpdate(),
-              icon: const Icon(Icons.restart_alt, size: 18),
-              label: const Text('Reboot'),
-            )),
-          ];
-        } else if (phase == UpdatePhase.done) {
-          content = Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final t in controller.updateTasks)
-                _TaskLine(label: t.label, done: t.installed),
-              const SizedBox(height: 12),
-              Text('Installed.', style: textTheme.bodyMedium),
-            ],
-          );
-          actions = [
-            Jelly(child: TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Done'),
-            )),
-          ];
-        } else {
-          content = Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('The following will be downloaded and installed:',
-                  style: textTheme.bodyMedium),
-              const SizedBox(height: 10),
-              if (kern != null)
-                _TaskLine(label: 'Kernel & modules · ${kern.dateLabel}'),
-              if (app != null) _TaskLine(label: 'App · v${app.version}'),
-              if (kern != null && controller.abDevice) ...[
-                const SizedBox(height: 14),
-                Text('Flash kernel to slot',
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant)),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final s in controller.slots)
-                      ChoiceChip(
-                        label: Text(
-                          '${s == '_a' ? 'A' : 'B'}'
-                          '${s == controller.activeSlot ? ' · active' : ''}',
-                        ),
-                        selected: controller.selectedSlot == s,
-                        onSelected: (_) => controller.setSelectedSlot(s),
-                      ),
-                  ],
-                ),
-              ],
-              // Only a kernel/modules update needs a reboot to activate — an
-              // app-only update installs in place, so don't threaten a reboot.
-              if (kern != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'The device will reboot at the end to activate the kernel '
-                  'modules.',
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
-              ],
-              // App changelog first, kernel changelog under it — each labelled,
-              // so it's obvious which artifact a line belongs to. The kernel
-              // section only exists when a kernel build is actually on offer.
-              if (_releaseNotes(app?.notes) != null ||
-                  _releaseNotes(kern?.notes) != null) ...[
-                const SizedBox(height: 16),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 260),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (_releaseNotes(app?.notes) case final notes?)
-                          _NotesSection(
-                            title: "What's new in the app · v${app!.version}",
-                            body: notes,
-                          ),
-                        if (_releaseNotes(kern?.notes) case final notes?) ...[
-                          if (_releaseNotes(app?.notes) != null)
-                            const SizedBox(height: 14),
-                          _NotesSection(
-                            title:
-                                "What's new in the kernel · ${kern!.dateLabel}",
-                            body: notes,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          );
-          actions = [
-            Jelly(child: TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Later'),
-            )),
-            Jelly(child: FilledButton.icon(
-              onPressed: () => controller.installAllUpdates(),
-              icon: const Icon(Icons.bolt, size: 18),
-              label: const Text('Install'),
-            )),
-          ];
-        }
-
-        return PopScope(
-          canPop: !busy,
-          child: AlertDialog(
-            title: const Text('Updates available'),
-            content: SizedBox(width: double.maxFinite, child: content),
-            actions: actions,
-          ),
-        );
-      },
-    ),
-  );
-}
-
-/// A labelled row for the update list — a hollow circle by default, a filled
-/// check once its artifact is installed.
-class _TaskLine extends StatelessWidget {
-  const _TaskLine({required this.label, this.done = false});
-
-  final String label;
-  final bool done;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          Icon(
-            done ? Icons.check_circle : Icons.radio_button_unchecked,
-            size: 17,
-            color: done ? scheme.primary : scheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A per-artifact progress bar: download percentage while downloading, then an
-/// indeterminate bar that fills to a check once the artifact is installed.
-class _TaskProgress extends StatelessWidget {
-  const _TaskProgress({required this.task, required this.installing});
-
-  final UpdateTask task;
-  final bool installing;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final done = task.installed;
-    final value = installing ? (done ? 1.0 : null) : task.downloadProgress;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(task.label,
-                  style: Theme.of(context).textTheme.bodySmall,
-                  overflow: TextOverflow.ellipsis),
-            ),
-            if (done)
-              Icon(Icons.check_circle, size: 15, color: scheme.primary)
-            else if (!installing && task.downloadProgress != null)
-              Text('${(task.downloadProgress! * 100).round()}%',
-                  style: Theme.of(context).textTheme.bodySmall),
-          ],
-        ),
-        const SizedBox(height: 5),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(value: value, minHeight: 6),
-        ),
-      ],
-    );
-  }
-}
-
-/// An attention-grabbing "Update" chip for the app bar — a filled accent pill
-/// that gently pulses (scale + glow) so a pending update is impossible to miss,
+/// A GitHub releases chip for the app bar — a filled accent pill
+/// that gently pulses when a newer manual release is available,
 /// unlike the plain icon it replaces.
-class _UpdatePill extends StatefulWidget {
-  const _UpdatePill({required this.onTap});
+class _ReleasePill extends StatefulWidget {
+  const _ReleasePill({required this.onTap});
 
   final VoidCallback onTap;
 
   @override
-  State<_UpdatePill> createState() => _UpdatePillState();
+  State<_ReleasePill> createState() => _ReleasePillState();
 }
 
-class _UpdatePillState extends State<_UpdatePill>
+class _ReleasePillState extends State<_ReleasePill>
     with TickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
@@ -901,13 +604,13 @@ class _UpdatePillState extends State<_UpdatePill>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.system_update,
+                      Icons.open_in_new,
                       size: 17,
                       color: scheme.onPrimary,
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      'Update',
+                      'Releases',
                       style: TextStyle(
                         color: scheme.onPrimary,
                         fontWeight: FontWeight.w700,
@@ -985,7 +688,7 @@ class _UnsupportedDeviceBanner extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Unsupported device — updates are disabled. This build is only '
+                  'Unsupported device. Kernel and modules are built only '
                   'for the Xiaomi 17 series (sm8850).',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: scheme.onErrorContainer,

@@ -1,3 +1,9 @@
+## Manual release delivery · 1.3.2
+
+Picters Modules Manager is distributed inside the matching A16 or A17 OOT modules pack. The app only reads release metadata and opens the kernel GitHub Releases page in your browser. It never downloads updates, installs APKs/modules or flashes boot partitions.
+
+Choose the kernel and OOTMODULES package from the same channel and release. Install and boot the kernel first, then install its OOT pack through KernelSU/Magisk and reboot. The APK is included as a system app. CPU/GPU frequency controls remain available.
+
 # Picters Modules Manager
 
 A dark, root Flutter app that manages the `picters-modules-pack` KernelSU/Magisk module — the

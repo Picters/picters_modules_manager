@@ -136,6 +136,12 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "requestPinShortcut" -> result.success(requestPinShortcut())
                 "openRootManager" -> result.success(openRootManager())
+                "openKernelReleases" -> result.success(runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(
+                        "https://github.com/Picters/android_kernel_xiaomi_sm8850-extra/releases"
+                    )))
+                    true
+                }.getOrDefault(false))
                 "restartApp" -> { result.success(true); restartApp() }
                 "filesDir" -> result.success(filesDir.absolutePath)
                 "shareFile" -> result.success(shareFile(call.argument("path")))

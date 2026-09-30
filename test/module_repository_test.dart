@@ -204,52 +204,6 @@ void main() {
       );
     });
 
-    test('installModuleZip tries ksud then magisk, else NO_MODULE_MANAGER',
-        () async {
-      final fake = FakeRootRunner((_) => const ShellResult(0, ''));
-      await ModuleRepository(fake).installModuleZip('/tmp/mods.zip');
-      expect(fake.lastScript, contains('ksud module install'));
-      expect(fake.lastScript, contains('magisk --install-module'));
-      expect(fake.lastScript, contains('NO_MODULE_MANAGER'));
-    });
-
-    test('copyToDownloads reports success only on the OK marker', () async {
-      expect(
-        await ModuleRepository(FakeRootRunner((_) => const ShellResult(0, 'OK')))
-            .copyToDownloads('/tmp/a.zip', 'a.zip'),
-        isTrue,
-      );
-      expect(
-        await ModuleRepository(FakeRootRunner((_) => const ShellResult(1, 'nope')))
-            .copyToDownloads('/tmp/a.zip', 'a.zip'),
-        isFalse,
-      );
-    });
-
-    test('flashKernelZip targets the inactive slot only when asked', () async {
-      final inactive = FakeRootRunner((_) => const ShellResult(0, 'AK3_EXIT:0'));
-      await ModuleRepository(inactive)
-          .flashKernelZip('/tmp/k.zip', inactiveSlot: true);
-      expect(inactive.lastScript, contains('export slot_select=inactive'));
-
-      final active = FakeRootRunner((_) => const ShellResult(0, 'AK3_EXIT:0'));
-      await ModuleRepository(active)
-          .flashKernelZip('/tmp/k.zip', inactiveSlot: false);
-      expect(active.lastScript, isNot(contains('slot_select=inactive')));
-    });
-
-    test('slotInfo distinguishes A/B from single-slot devices', () async {
-      expect(
-        await ModuleRepository(FakeRootRunner((_) => const ShellResult(0, 'AB _a')))
-            .slotInfo(),
-        (true, '_a'),
-      );
-      expect(
-        await ModuleRepository(FakeRootRunner((_) => const ShellResult(0, 'SINGLE ')))
-            .slotInfo(),
-        (false, ''),
-      );
-    });
   });
 
   group('device gate (isSupportedDevice)', () {

@@ -69,7 +69,7 @@ List<WifiInterface> parseIfaceLines(Iterable<String> lines) {
   return out;
 }
 
-/// The device-identity props the updater gates on.
+/// The device-identity props release notices identify.
 class DeviceIdentity {
   const DeviceIdentity({
     required this.socModel,
@@ -107,7 +107,7 @@ DeviceIdentity parseDeviceIdentity(String out) {
 }
 
 /// True for a Xiaomi 17-series phone (base / Pro / Pro Max / Ultra). They all
-/// use the sm8850 SoC the kernel + OOT modules are built for, so the updater
+/// use the sm8850 SoC the kernel + OOT modules are built for, so release notices
 /// only offers a build to one of these — never to a device it could brick.
 /// Accepts either an explicit "Xiaomi 17…" market name or the Xiaomi-branded
 /// sm8850 combo (market name is blank on some builds; the SoC never is).
@@ -613,7 +613,7 @@ class ModuleRepository {
   Future<void> deleteDebugLogs(String path) =>
       _shell.run("rm -f '$path'");
 
-  // ── Kernel / OOT-modules update delivery ────────────────────────────────
+  // ── Installed release information ────────────────────────────────
 
   static const String _modProp =
       '/data/adb/modules/picters-modules-pack/module.prop';
@@ -627,25 +627,6 @@ class ModuleRepository {
     return int.tryParse(r.stdout.trim()) ?? 0;
   }
 
-  /// Copies a downloaded zip into /sdcard/Download so the user can flash it
-  /// themselves in KernelSU/Magisk. Uses root since scoped storage blocks it.
-  Future<bool> copyToDownloads(String srcPath, String name) async {
-    final r = await _shell.run(
-      "mkdir -p /sdcard/Download && cp '$srcPath' '/sdcard/Download/$name' && "
-      "chmod 664 '/sdcard/Download/$name' && echo OK",
-    );
-    return r.stdout.contains('OK');
-  }
-
-  /// Installs the OOT-modules zip as a KernelSU (or Magisk) module — the safe
-  /// auto path (no boot flashing). A reboot is required to activate it.
-  Future<ShellResult> installModuleZip(String zipPath) => _shell.run(
-        "if command -v ksud >/dev/null 2>&1; then ksud module install '$zipPath' 2>&1; "
-        "elif command -v magisk >/dev/null 2>&1; then magisk --install-module '$zipPath' 2>&1; "
-        "else echo NO_MODULE_MANAGER; fi",
-        timeout: const Duration(seconds: 90),
-      );
-
   /// The running kernel's release string (`uname -r`) — the app checks it for
   /// the "picters" tag to warn when it's running on a foreign kernel.
   Future<String> kernelRelease() async {
@@ -653,9 +634,9 @@ class ModuleRepository {
     return r.stdout.trim();
   }
 
-  /// The device-identity props the updater gates on (one round-trip). The
+  /// The device-identity props release notices identify (one round-trip). The
   /// kernel + OOT modules are built for the Xiaomi 17 series' sm8850 SoC, so
-  /// this decides whether it's safe to offer an update at all.
+  /// this decides whether this hardware matches the package.
   Future<DeviceIdentity> deviceIdentity() async {
     final r = await _shell.run(
       'echo "SOC:\$(getprop ro.soc.model)"; '
@@ -663,63 +644,6 @@ class ModuleRepository {
       'echo "MARKET:\$(getprop ro.product.marketname)"',
     );
     return parseDeviceIdentity(r.stdout);
-  }
-
-  /// Read system SDK and vendor identity independently of the running custom kernel.
-  Future<Map<String, dynamic>> updateCompatibility() async {
-    final r = await _shell.run(
-      'getprop ro.build.version.sdk; getprop ro.vendor.build.fingerprint',
-    );
-    if (!r.ok) return {};
-    final lines = r.stdout.trim().split('\n');
-    if (lines.length != 2) return {};
-    return {
-      'android_sdk': int.tryParse(lines[0].trim()),
-      'vendor_fingerprint': lines[1].trim(),
-    };
-  }
-
-  /// A UUID that changes on every boot — lets the app tell whether a reboot has
-  /// happened since a pending update was installed.
-  Future<String> currentBootId() async {
-    final r = await _shell.run('cat /proc/sys/kernel/random/boot_id 2>/dev/null');
-    return r.stdout.trim();
-  }
-
-  /// (isAbDevice, activeSlotSuffix). isAb is true only when both boot_a and
-  /// boot_b exist; activeSlot is "_a"/"_b" (empty on non-slot devices).
-  Future<(bool, String)> slotInfo() async {
-    final r = await _shell.run(
-      'A=\$(getprop ro.boot.slot_suffix); '
-      'if ls /dev/block/by-name/boot_a >/dev/null 2>&1 && '
-      'ls /dev/block/by-name/boot_b >/dev/null 2>&1; then echo "AB \$A"; '
-      'else echo "SINGLE \$A"; fi',
-    );
-    final parts = r.stdout.trim().split(RegExp(r'\s+'));
-    final ab = parts.isNotEmpty && parts.first == 'AB';
-    final slot = parts.length > 1 ? parts[1].trim() : '';
-    return (ab, slot);
-  }
-
-  /// Flashes an AnyKernel3 kernel zip to a boot slot via root (bootmode). With
-  /// [inactiveSlot] true, AK3's slot_select=inactive targets the OTHER slot;
-  /// otherwise it writes the active slot. Success = the run prints AK3_EXIT:0
-  /// and no AK3 "abort". Never touches the boot image on a plain module update.
-  Future<ShellResult> flashKernelZip(String zipPath,
-      {required bool inactiveSlot}) {
-    final b = StringBuffer();
-    b.writeln('AK=/data/local/tmp/pmm_ak3');
-    b.writeln('rm -rf "\$AK"; mkdir -p "\$AK"');
-    b.writeln(
-        'if ! unzip -o "$zipPath" -d "\$AK" >/dev/null 2>&1; then echo AK3_UNZIP_FAIL; exit 0; fi');
-    b.writeln('UB="\$AK/META-INF/com/google/android/update-binary"');
-    b.writeln('[ -f "\$UB" ] || { echo AK3_NO_UB; exit 0; }');
-    b.writeln('export AKHOME="\$AK"');
-    if (inactiveSlot) b.writeln('export slot_select=inactive');
-    b.writeln('sh "\$UB" 3 1 "$zipPath" 2>&1');
-    b.writeln('echo "AK3_EXIT:\$?"');
-    b.writeln('rm -rf "\$AK"');
-    return _shell.run(b.toString(), timeout: const Duration(seconds: 180));
   }
 
   /// The insmod/rmmod output itself, excluding the DMESG_TAIL section that

@@ -10,29 +10,28 @@ import 'pending_op.dart';
 import 'perf_controller.dart';
 import 'root_shell.dart';
 import 'settings_controller.dart';
-import 'update_controller.dart';
+import 'releases_controller.dart';
 import 'usb_devices.dart';
 
 enum RootStatus { checking, granted, denied }
 
 /// Single source of truth for the live system view — root status, the 1-second
-/// poll and every Wi-Fi/module/adapter action. Update delivery and Settings
-/// state live in their own notifiers ([update], [settings]) so those screens
+/// poll and every Wi-Fi/module/adapter action. Release notices and Settings
+/// state live in their own notifiers ([releases], [settings]) so those screens
 /// don't rebuild on the scan; everything here funnels through the persistent
 /// root shell, so a poll is one cheap round-trip.
 class AppController extends ChangeNotifier {
   AppController(ModuleRepository repo)
       : _repo = repo,
-        update = UpdateController(repo),
+        releases = ReleasesController(repo),
         settings = SettingsController(repo),
         perf = PerfController(),
         iw = IwRepository();
 
   final ModuleRepository _repo;
 
-  /// Update flow (self-update APK + kernel/OOT-modules build). Its own notifier
-  /// so the update dialog and app-bar pill don't rebuild on the 1s system scan.
-  final UpdateController update;
+  /// Read-only release notices. Installation is handled manually outside the app.
+  final ReleasesController releases;
 
   /// Settings tab state (boot-load flag, debug-log bundler), likewise isolated.
   final SettingsController settings;
@@ -193,7 +192,7 @@ class AppController extends ChangeNotifier {
       // After the first scan, so a resumed action is judged against real state
       // rather than the empty placeholder.
       unawaited(_restorePendingOp());
-      unawaited(update.init());
+      unawaited(releases.init());
       unawaited(perf.init());
       unawaited(_checkKernelAuthentic());
     } else {
@@ -256,7 +255,7 @@ class AppController extends ChangeNotifier {
       unawaited(RootShell.initBinder());
       await _pollOnce(force: true);
       _startTimer();
-      unawaited(update.init());
+      unawaited(releases.init());
       unawaited(settings.init());
       unawaited(perf.init());
       unawaited(_checkKernelAuthentic());
@@ -788,7 +787,7 @@ class AppController extends ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     _timer = null;
-    update.dispose();
+    releases.dispose();
     settings.dispose();
     perf.dispose();
     super.dispose();
