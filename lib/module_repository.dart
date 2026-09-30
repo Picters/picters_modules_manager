@@ -627,6 +627,20 @@ class ModuleRepository {
     return int.tryParse(r.stdout.trim()) ?? 0;
   }
 
+  /// Prefer the installed pack's channel, then the system SDK for older packs.
+  Future<String?> installedReleaseChannel() async {
+    final r = await _shell.run(
+      "grep '^releaseChannel=' '$_modProp' 2>/dev/null | head -1 | cut -d= -f2; "
+      'getprop ro.build.version.sdk',
+    );
+    if (!r.ok) return null;
+    final lines = r.stdout.trim().split('\n');
+    final channel = lines.first.trim();
+    if (channel == 'A16' || channel == 'A17') return channel;
+    final sdk = lines.last.trim();
+    return sdk == '36' ? 'A16' : sdk == '37' ? 'A17' : null;
+  }
+
   /// The running kernel's release string (`uname -r`) — the app checks it for
   /// the "picters" tag to warn when it's running on a foreign kernel.
   Future<String> kernelRelease() async {

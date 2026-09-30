@@ -252,12 +252,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         actions: [
           if (_hasUpdate)
             _ReleasePill(onTap: () => _openReleases(context)),
-          if (!_hasUpdate)
-            _SquareIconButton(
-              icon: Icons.open_in_new,
-              tooltip: 'GitHub releases · manual installation',
-              onTap: () => _openReleases(context),
-            ),
           if (granted)
             _SquareIconButton(
               icon: Icons.add_to_home_screen_outlined,
@@ -604,13 +598,13 @@ class _ReleasePillState extends State<_ReleasePill>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.open_in_new,
+                      Icons.system_update,
                       size: 17,
                       color: scheme.onPrimary,
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      'Releases',
+                      'Update',
                       style: TextStyle(
                         color: scheme.onPrimary,
                         fontWeight: FontWeight.w700,

@@ -10,7 +10,7 @@ A dark, root Flutter app that manages the `picters-modules-pack` KernelSU/Magisk
 Wi-Fi injection stack and other out-of-tree kernel drivers — from your phone. In general it
 toggles drivers over root, switches Wi-Fi between **Stock** and **Inject**, and hands a loaded
 external adapter back to stock Android Settings as a normal managed station. Ships hidden inside
-the module, self-updates from GitHub Releases, and opens from its Action button.
+the module, links to GitHub Releases for manual updates, and opens from its Action button.
 
 Because it ships as a system app, enable **Show system apps** in your KernelSU/Magisk manager to
 find it and grant Superuser the first time.

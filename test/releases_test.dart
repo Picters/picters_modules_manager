@@ -5,8 +5,14 @@ void main() {
   Map<String, dynamic> release(String channel, String stamp) => {
     'tag_name': '$channel-$stamp',
     'assets': [
-      {'name': '$channel-Kernel.zip'},
-      {'name': '$channel-OOTMODULES.zip'},
+      {
+        'name':
+            'Mi17_Kernel-6.12.23-android${channel.substring(1)}-picters-ReSuki-g123-susfs-$stamp.zip',
+      },
+      {
+        'name':
+            'Mi17_OOTMODULES-6.12.23-android${channel.substring(1)}-picters-ReSuki-g123-susfs-$stamp.zip',
+      },
     ],
   };
   test('manual releases notify for either channel', () {
@@ -20,6 +26,14 @@ void main() {
         release('A17', '20261001-0030'),
       ]),
       610010030,
+    );
+  });
+  test('a different channel never creates a release notice', () {
+    expect(
+      newestManualReleaseCode([
+        release('A17', '20260930-2330'),
+      ], channel: 'A16'),
+      0,
     );
   });
   test('old formats, missing pairs, drafts and prereleases do not notify', () {
