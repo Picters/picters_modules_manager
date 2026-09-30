@@ -22,19 +22,21 @@ const String kKernelPerfDir = '/sys/kernel/picters_perf';
 const String kKernelCpuMaxNode = '$kKernelPerfDir/cpu_max_freq';
 const String kKernelProfileNode = '$kKernelPerfDir/profile';
 
-List<int> _parseFreqList(String s) => s
-    .trim()
-    .split(RegExp(r'\s+'))
-    .map((t) => int.tryParse(t.trim()))
-    .whereType<int>()
-    .toList()
-  ..sort();
+List<int> _parseFreqList(String s) =>
+    s
+        .trim()
+        .split(RegExp(r'\s+'))
+        .map((t) => int.tryParse(t.trim()))
+        .whereType<int>()
+        .where((f) => f > 0)
+        .toList()
+      ..sort();
 
 /// Reads and applies CPU/GPU frequency caps over root. Every applied value is
 /// snapped to a real OPP step by [cappedMax], so nothing unsafe is ever written.
 class PerfRepository {
   PerfRepository([RootRunner runner = const DefaultRootRunner()])
-      : _shell = runner;
+    : _shell = runner;
 
   final RootRunner _shell;
 
@@ -71,15 +73,20 @@ class PerfRepository {
     required bool persistOnBoot,
   }) {
     final b = StringBuffer();
+    b.writeln('pmm_set_perf() {');
     final cpuLines = <String>[];
     // "<first-cpu>:<khz>" pairs for the in-kernel ceilings; also persisted so
     // the boot service can re-pin them without recomputing the profile.
     final kernelPairs = <String>[];
     for (final c in state.clusters) {
       final freq = cappedMax(
-          profile, cpuDomain(c, state.clusters), c.maxHardware, c.availableFreqs);
+        profile,
+        cpuDomain(c, state.clusters),
+        c.maxHardware,
+        c.availableFreqs,
+      );
       final node = '$_cpuBase/${c.policy}/scaling_max_freq';
-      b.writeln("echo $freq > '$node' 2>/dev/null");
+      b.writeln("echo $freq > '$node' || return 1");
       cpuLines.add('cpu $_cpuBase/${c.policy} $freq');
       final cpu = firstCpuOf(c);
       // khz 0 drops the kernel request entirely, so Full really is stock rather
@@ -90,23 +97,32 @@ class PerfRepository {
     }
     if (state.kernelCapsSupported && kernelPairs.isNotEmpty) {
       b.writeln(
-          "echo '${kernelPairs.join(' ')}' > '$kKernelCpuMaxNode' 2>/dev/null");
-      b.writeln("echo '${profile.name}' > '$kKernelProfileNode' 2>/dev/null");
+        "echo '${kernelPairs.join(' ')}' > '$kKernelCpuMaxNode' || return 1",
+      );
+      b.writeln("echo '${profile.name}' > '$kKernelProfileNode' || return 1");
     }
     String? gpuLine;
     final gpu = state.gpu;
     if (gpu != null && gpu.stockMax > 0) {
-      final gfreq =
-          cappedMax(profile, PerfDomain.gpu, gpu.stockMax, gpu.availableFreqs);
-      b.writeln("echo $gfreq > '$kGpuMaxNode' 2>/dev/null");
+      final gfreq = cappedMax(
+        profile,
+        PerfDomain.gpu,
+        gpu.stockMax,
+        gpu.availableFreqs,
+      );
+      b.writeln("echo $gfreq > '$kGpuMaxNode' || return 1");
+      b.writeln(
+        "[ \"\$(cat '$kGpuMaxNode')\" = '$gfreq' ] || "
+        "{ echo 'GPU rejected the requested maximum'; return 1; }",
+      );
       gpuLine = 'gpu $gfreq';
     }
 
     // Rewrite the boot config (append-built so no heredoc is needed inside the
     // framed root script).
-    b.writeln("mkdir -p '$kPerfConfigDir'");
-    b.writeln("C='$kPerfConfig'");
-    b.writeln(': > "\$C"');
+    b.writeln("mkdir -p '$kPerfConfigDir' || return 1");
+    b.writeln("C='$kPerfConfig.tmp'");
+    b.writeln(': > "\$C" || return 1');
     b.writeln('echo "enabled ${persistOnBoot ? 1 : 0}" >> "\$C"');
     b.writeln('echo "profile ${profile.name}" >> "\$C"');
     if (gpu != null && gpu.stockMax > 0) {
@@ -119,7 +135,10 @@ class PerfRepository {
       b.writeln('echo "kcpu ${kernelPairs.join(' ')}" >> "\$C"');
     }
     if (gpuLine != null) b.writeln('echo "$gpuLine" >> "\$C"');
+    b.writeln('mv "\$C" "$kPerfConfig" || return 1');
     b.writeln('echo OK_PERF');
+    b.writeln('}');
+    b.writeln('pmm_set_perf');
     return _shell.run(b.toString(), timeout: const Duration(seconds: 20));
   }
 }
@@ -134,7 +153,8 @@ PerfState parsePerfScan(String out) {
   var gpuAvail = <int>[];
   var gpuMax = 0;
   final conf = <String, String>{};
-  final confCpu = <String, int>{}; // policyPath -> freq (unused for state, kept simple)
+  final confCpu =
+      <String, int>{}; // policyPath -> freq (unused for state, kept simple)
   var bootOk = false;
   var kernelOk = false;
 
@@ -204,26 +224,31 @@ PerfState parsePerfScan(String out) {
         .map(int.tryParse)
         .whereType<int>()
         .toList();
-    clusters.add(CpuCluster(
-      policy: entry.key,
-      cpus: cpus,
-      maxHardware: f.length > 2 ? (int.tryParse(f[2].trim()) ?? 0) : 0,
-      scalingMax: f.length > 3 ? (int.tryParse(f[3].trim()) ?? 0) : 0,
-      availableFreqs: freqByPolicy[entry.key] ?? const [],
-      governor: f.length > 4 ? f[4].trim() : '',
-    ));
+    clusters.add(
+      CpuCluster(
+        policy: entry.key,
+        cpus: cpus,
+        maxHardware: f.length > 2 ? (int.tryParse(f[2].trim()) ?? 0) : 0,
+        scalingMax: f.length > 3 ? (int.tryParse(f[3].trim()) ?? 0) : 0,
+        availableFreqs: freqByPolicy[entry.key] ?? const [],
+        governor: f.length > 4 ? f[4].trim() : '',
+      ),
+    );
   }
   clusters.sort((a, b) => a.policy.compareTo(b.policy));
 
-  // Stock GPU ceiling: the config's captured value if present, else the live
-  // max (first capture, before any cap was written).
+  // max_gpuclk is a writable cap, not the hardware maximum. Prefer the
+  // driver's supported OPP table, so an old cap (including a saved gpustock)
+  // cannot permanently reduce Full. Keep the legacy fallback without a table.
   final confGpuStock = int.tryParse(conf['gpustock'] ?? '');
   final gpu = gpuAvail.isEmpty && gpuMax == 0
       ? null
       : GpuInfo(
           availableFreqs: gpuAvail,
           currentMax: gpuMax,
-          stockMax: confGpuStock ?? gpuMax,
+          stockMax: gpuAvail.isNotEmpty
+              ? gpuAvail.last
+              : (confGpuStock ?? gpuMax),
         );
 
   return PerfState(

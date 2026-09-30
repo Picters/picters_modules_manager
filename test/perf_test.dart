@@ -27,10 +27,34 @@ void main() {
   group('cappedMax — safety', () {
     // The real policy0 (6 cores) OPP table from the device.
     const p0 = [
-      384000, 537600, 691200, 787200, 883200, 998400, 1113600, 1228800,
-      1324800, 1440000, 1555200, 1670400, 1785600, 1900800, 1996800, 2112000,
-      2227200, 2361600, 2496000, 2611200, 2745600, 2899200, 3033600, 3187200,
-      3302400, 3398400, 3513600, 3628800,
+      384000,
+      537600,
+      691200,
+      787200,
+      883200,
+      998400,
+      1113600,
+      1228800,
+      1324800,
+      1440000,
+      1555200,
+      1670400,
+      1785600,
+      1900800,
+      1996800,
+      2112000,
+      2227200,
+      2361600,
+      2496000,
+      2611200,
+      2745600,
+      2899200,
+      3033600,
+      3187200,
+      3302400,
+      3398400,
+      3513600,
+      3628800,
     ];
     const stock = 3628800;
     const perf = PerfDomain.perfCpu;
@@ -63,9 +87,12 @@ void main() {
       );
     });
 
-    test('empty OPP table falls back to stock (never writes a bogus value)', () {
-      expect(cappedMax(PerfProfile.eco, perf, stock, const []), stock);
-    });
+    test(
+      'empty OPP table falls back to stock (never writes a bogus value)',
+      () {
+        expect(cappedMax(PerfProfile.eco, perf, stock, const []), stock);
+      },
+    );
 
     test('Ultra Eco is strictly below Eco on every domain', () {
       for (final d in PerfDomain.values) {
@@ -108,17 +135,20 @@ void main() {
       expect(firstCpuOf(c), 6);
     });
 
-    test('falls back to the policy dir name when related_cpus is unreadable', () {
-      const c = CpuCluster(
-        policy: 'policy6',
-        cpus: [],
-        maxHardware: 4608000,
-        scalingMax: 4608000,
-        availableFreqs: [],
-        governor: 'walt',
-      );
-      expect(firstCpuOf(c), 6);
-    });
+    test(
+      'falls back to the policy dir name when related_cpus is unreadable',
+      () {
+        const c = CpuCluster(
+          policy: 'policy6',
+          cpus: [],
+          maxHardware: 4608000,
+          scalingMax: 4608000,
+          availableFreqs: [],
+          governor: 'walt',
+        );
+        expect(firstCpuOf(c), 6);
+      },
+    );
   });
 
   group('parsePerfScan', () {
@@ -143,12 +173,16 @@ ${bootOk ? 'PERF_BOOT_OK' : ''}
 ${kernelOk ? 'PERF_KERNEL_OK' : ''}''';
 
     test('parses clusters, GPU and the persisted profile from config', () {
-      final s = parsePerfScan(scan(conf: '''
+      final s = parsePerfScan(
+        scan(
+          conf: '''
 enabled 1
 profile eco
 gpustock 902000000
 cpu /sys/devices/system/cpu/cpufreq/policy0 1670400
-gpu 422000000'''));
+gpu 422000000''',
+        ),
+      );
 
       expect(s.clusters, hasLength(2));
       final p0 = s.clusters.firstWhere((c) => c.policy == 'policy0');
@@ -158,16 +192,40 @@ gpu 422000000'''));
 
       expect(s.gpu, isNotNull);
       expect(s.gpu!.currentMax, 902000000);
-      expect(s.gpu!.stockMax, 902000000); // from config
+      expect(s.gpu!.stockMax, 1200000000); // supported OPP maximum
       expect(s.profile, PerfProfile.eco);
       expect(s.persistOnBoot, isTrue);
     });
 
-    test('with no config, GPU stock is captured from the live max', () {
-      final s = parsePerfScan(scan(conf: ''));
-      expect(s.gpu!.stockMax, 902000000); // live GMAX, first capture
-      expect(s.profile, isNull);
-      expect(s.persistOnBoot, isFalse);
+    test(
+      'Full uses the supported maximum even when the live GPU is capped',
+      () {
+        final s = parsePerfScan(scan(conf: ''));
+        expect(s.gpu!.stockMax, 1200000000);
+        expect(s.profile, isNull);
+        expect(s.persistOnBoot, isFalse);
+      },
+    );
+
+    test('stale saved GPU ceiling cannot keep Full capped', () {
+      final s = parsePerfScan(scan(conf: 'gpustock 539000000'));
+      expect(
+        cappedMax(
+          PerfProfile.full,
+          PerfDomain.gpu,
+          s.gpu!.stockMax,
+          s.gpu!.availableFreqs,
+        ),
+        1200000000,
+      );
+    });
+
+    test('without a GPU table the saved ceiling remains the fallback', () {
+      final out = scan(conf: 'gpustock 902000000').replaceAll(
+        'GAVAIL:160000000 539000000 902000000 1200000000',
+        'GAVAIL:',
+      );
+      expect(parsePerfScan(out).gpu!.stockMax, 902000000);
     });
 
     test('prime cluster labels correctly against the set', () {
@@ -179,18 +237,26 @@ gpu 422000000'''));
     });
 
     test('module perf boot-support is read from the capability marker', () {
-      expect(parsePerfScan(scan(conf: '', bootOk: true)).bootApplySupported,
-          isTrue);
-      expect(parsePerfScan(scan(conf: '', bootOk: false)).bootApplySupported,
-          isFalse);
+      expect(
+        parsePerfScan(scan(conf: '', bootOk: true)).bootApplySupported,
+        isTrue,
+      );
+      expect(
+        parsePerfScan(scan(conf: '', bootOk: false)).bootApplySupported,
+        isFalse,
+      );
     });
 
     test('in-kernel ceilings are detected from their own marker', () {
-      expect(parsePerfScan(scan(conf: '', kernelOk: true)).kernelCapsSupported,
-          isTrue);
+      expect(
+        parsePerfScan(scan(conf: '', kernelOk: true)).kernelCapsSupported,
+        isTrue,
+      );
       // Present module support must not be mistaken for kernel support.
-      expect(parsePerfScan(scan(conf: '', bootOk: true)).kernelCapsSupported,
-          isFalse);
+      expect(
+        parsePerfScan(scan(conf: '', bootOk: true)).kernelCapsSupported,
+        isFalse,
+      );
     });
   });
 }

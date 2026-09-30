@@ -44,7 +44,7 @@ class PerfController extends ChangeNotifier {
         state: state,
         persistOnBoot: state.persistOnBoot,
       );
-      if (!r.stdout.contains('OK_PERF')) {
+      if (!r.ok || !r.stdout.contains('OK_PERF')) {
         lastError = 'Could not apply the profile: ${r.errorSummary}';
       }
       await refresh();
@@ -61,11 +61,14 @@ class PerfController extends ChangeNotifier {
     busy = true;
     notifyListeners();
     try {
-      await _repo.applyProfile(
+      final r = await _repo.applyProfile(
         profile: profile,
         state: state,
         persistOnBoot: value,
       );
+      if (!r.ok || !r.stdout.contains('OK_PERF')) {
+        lastError = 'Could not apply the profile: ${r.errorSummary}';
+      }
       await refresh();
     } catch (e) {
       lastError = 'Error: $e';
