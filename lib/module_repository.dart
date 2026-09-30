@@ -665,6 +665,20 @@ class ModuleRepository {
     return parseDeviceIdentity(r.stdout);
   }
 
+  /// Read system SDK and vendor identity independently of the running custom kernel.
+  Future<Map<String, dynamic>> updateCompatibility() async {
+    final r = await _shell.run(
+      'getprop ro.build.version.sdk; getprop ro.vendor.build.fingerprint',
+    );
+    if (!r.ok) return {};
+    final lines = r.stdout.trim().split('\n');
+    if (lines.length != 2) return {};
+    return {
+      'android_sdk': int.tryParse(lines[0].trim()),
+      'vendor_fingerprint': lines[1].trim(),
+    };
+  }
+
   /// A UUID that changes on every boot — lets the app tell whether a reboot has
   /// happened since a pending update was installed.
   Future<String> currentBootId() async {

@@ -23,6 +23,28 @@ int moduleVersionCode(String yyyymmdd, String hhmm) {
 
 /// An available kernel/OOT-modules build: the two flashable zips plus the packed
 /// versionCode parsed from their date-stamped names.
+/// Accept only builds tested with this exact vendor firmware. SDK alone cannot
+/// distinguish two vendor module ABIs from different firmware revisions.
+bool kernelCompatibilityMatches(
+  Map<String, dynamic> manifest,
+  Map<String, dynamic> device,
+) {
+  final sdk = manifest['android_sdk'];
+  final generation = manifest['kmi_generation'];
+  final channel = manifest['channel'];
+  final vendors = manifest['validated_vendor_fingerprints'];
+  final vendor = device['vendor_fingerprint'];
+  return manifest['schema'] == 1 &&
+      manifest['status'] == 'validated' &&
+      ((channel == 'android16' && sdk == 36 && generation == 5) ||
+          (channel == 'android17' && sdk == 37 && generation == 6)) &&
+      sdk == device['android_sdk'] &&
+      vendor is String &&
+      vendor.isNotEmpty &&
+      vendors is List &&
+      vendors.contains(vendor);
+}
+
 class KernelUpdateInfo {
   const KernelUpdateInfo({
     required this.versionCode,
@@ -32,8 +54,10 @@ class KernelUpdateInfo {
     required this.kernelUrl,
     required this.kernelName,
     required this.notes,
+    required this.compatibility,
   });
 
+  final Map<String, dynamic> compatibility;
   final int versionCode;
   final String dateLabel; // e.g. "20260719-2228"
   final String modulesUrl;
@@ -44,7 +68,11 @@ class KernelUpdateInfo {
 }
 
 class UpdateInfo {
-  const UpdateInfo({required this.version, required this.apkUrl, required this.notes});
+  const UpdateInfo({
+    required this.version,
+    required this.apkUrl,
+    required this.notes,
+  });
 
   final String version;
   final String apkUrl;
@@ -61,7 +89,11 @@ class UpdateChecker {
     try {
       final info = await PackageInfo.fromPlatform();
       final req = await client
-          .getUrl(Uri.parse('https://api.github.com/repos/$kUpdateRepo/releases/latest'))
+          .getUrl(
+            Uri.parse(
+              'https://api.github.com/repos/$kUpdateRepo/releases/latest',
+            ),
+          )
           .timeout(const Duration(seconds: 10));
       req.headers.set('Accept', 'application/vnd.github+json');
       req.headers.set('User-Agent', 'PictersModulesManager');
@@ -72,7 +104,8 @@ class UpdateChecker {
 
       final tag = (json['tag_name'] as String? ?? '').trim();
       final remoteVersion = tag.startsWith('v') ? tag.substring(1) : tag;
-      if (remoteVersion.isEmpty || !isNewerVersion(remoteVersion, info.version)) {
+      if (remoteVersion.isEmpty ||
+          !isNewerVersion(remoteVersion, info.version)) {
         return null;
       }
 
@@ -102,12 +135,16 @@ class UpdateChecker {
   /// Checks the kernel repo for the newest build that ships an OOT-modules zip
   /// (skips the ci-core-latest binary release). Returns its two zip URLs + the
   /// packed versionCode, or null if none / offline / the API call fails.
-  Future<KernelUpdateInfo?> checkKernel() async {
+  Future<KernelUpdateInfo?> checkKernel({Map<String, dynamic>? device}) async {
+    if (device == null) return null;
     final client = HttpClient();
     try {
       final req = await client
-          .getUrl(Uri.parse(
-              'https://api.github.com/repos/$kKernelRepo/releases?per_page=15'))
+          .getUrl(
+            Uri.parse(
+              'https://api.github.com/repos/$kKernelRepo/releases?per_page=15',
+            ),
+          )
           .timeout(const Duration(seconds: 10));
       req.headers.set('Accept', 'application/vnd.github+json');
       req.headers.set('User-Agent', 'PictersModulesManager');
@@ -120,7 +157,34 @@ class UpdateChecker {
       final stamp = RegExp(r'(\d{8})-(\d{4})\.zip$');
       for (final r in releases) {
         final rel = r as Map<String, dynamic>;
-        if (rel['draft'] == true) continue;
+        if (rel['draft'] == true || rel['prerelease'] == true) continue;
+        final metadataAssets = ((rel['assets'] as List?) ?? const []).where(
+          (a) => a is Map && a['name'] == 'picters-update.json',
+        );
+        if (metadataAssets.length != 1) continue;
+        final metadataUrl = metadataAssets.single['browser_download_url'];
+        if (metadataUrl is! String) continue;
+        Map<String, dynamic> manifest;
+        try {
+          final metadataReq = await client
+              .getUrl(Uri.parse(metadataUrl))
+              .timeout(const Duration(seconds: 10));
+          final metadataRes = await metadataReq.close().timeout(
+            const Duration(seconds: 10),
+          );
+          if (metadataRes.statusCode != 200) continue;
+          manifest =
+              jsonDecode(
+                    await metadataRes
+                        .transform(utf8.decoder)
+                        .join()
+                        .timeout(const Duration(seconds: 10)),
+                  )
+                  as Map<String, dynamic>;
+        } catch (_) {
+          continue;
+        }
+        if (!kernelCompatibilityMatches(manifest, device)) continue;
         final assets = (rel['assets'] as List?) ?? const [];
         String? modulesUrl, modulesName, kernelUrl, kernelName;
         for (final a in assets) {
@@ -134,18 +198,27 @@ class UpdateChecker {
           // gives shell injection. A skipped kernel asset just drops the flash;
           // a skipped modules asset skips the whole release below.
           if (!isSafeAssetName(name)) continue;
-          if (name.contains('OOT-Modules')) {
+          if (name == manifest['modules_asset']) {
             modulesUrl = url;
             modulesName = name;
-          } else if (name.contains('Kernel')) {
+          } else if (name == manifest['kernel_asset']) {
             kernelUrl = url;
             kernelName = name;
           }
         }
-        if (modulesUrl == null || modulesName == null) continue;
+        if (modulesUrl == null ||
+            modulesName == null ||
+            kernelUrl == null ||
+            kernelName == null) {
+          continue;
+        }
 
         final m = stamp.firstMatch(modulesName);
-        if (m == null) continue;
+        if (m == null ||
+            manifest['version_code'] !=
+                moduleVersionCode(m.group(1)!, m.group(2)!)) {
+          continue;
+        }
         return KernelUpdateInfo(
           versionCode: moduleVersionCode(m.group(1)!, m.group(2)!),
           dateLabel: '${m.group(1)}-${m.group(2)}',
@@ -154,6 +227,7 @@ class UpdateChecker {
           kernelUrl: kernelUrl,
           kernelName: kernelName,
           notes: (rel['body'] as String? ?? '').trim(),
+          compatibility: manifest,
         );
       }
       return null;
@@ -166,8 +240,11 @@ class UpdateChecker {
 
   /// Downloads a release zip to [destPath], retrying transient failures and
   /// checking it's a real (PK-magic) zip of the declared size before returning.
-  Future<File> downloadZip(String url, String destPath,
-      {void Function(int received, int total)? onProgress}) async {
+  Future<File> downloadZip(
+    String url,
+    String destPath, {
+    void Function(int received, int total)? onProgress,
+  }) async {
     final file = File(destPath);
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
@@ -212,8 +289,10 @@ class UpdateChecker {
 
   /// Downloads the release APK into the app's cache dir, retrying on
   /// transient failures and validating the result before handing it back.
-  Future<File> download(String url,
-      {void Function(int received, int total)? onProgress}) async {
+  Future<File> download(
+    String url, {
+    void Function(int received, int total)? onProgress,
+  }) async {
     final file = File('${Directory.systemTemp.path}/pmm_update.apk');
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {

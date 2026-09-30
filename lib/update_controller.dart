@@ -86,7 +86,9 @@ class UpdateController extends ChangeNotifier {
   }
 
   Future<void> _checkForKernelUpdate() async {
-    final info = await _updates.checkKernel();
+    final info = await _updates.checkKernel(
+      device: await _repo.updateCompatibility(),
+    );
     if (_disposed) return;
     if (info != null) {
       availableKernelUpdate = info;
@@ -172,7 +174,7 @@ class UpdateController extends ChangeNotifier {
   /// /sdcard/Download for a manual flash), then the app APK. Modules go first
   /// (they can't kill us); the APK is last because `pm install` may restart the
   /// app. A reboot afterwards activates the modules. UI reads [updateTasks] /
-  /// [updatePhase]; nothing is flashed to the boot image by the app.
+  /// [updatePhase]; the compatible kernel is flashed to the selected boot slot.
   Future<void> installAllUpdates() async {
     if (combinedUpdateBusy || !deviceSupported) return;
     final app = availableUpdate;
@@ -196,16 +198,22 @@ class UpdateController extends ChangeNotifier {
       if (kern != null) {
         final task = updateTasks.firstWhere((t) => t.isKernel);
         modsFile = await _updates.downloadZip(
-            kern.modulesUrl, '$tmp/${kern.modulesName}', onProgress: (r, t) {
-          task.downloadProgress = t > 0 ? r / t : null;
-          notifyListeners();
-        });
-        if (kern.kernelUrl != null && kern.kernelName != null) {
-          kernFile = await _updates.downloadZip(
-              kern.kernelUrl!, '$tmp/${kern.kernelName}', onProgress: (r, t) {
+          kern.modulesUrl,
+          '$tmp/${kern.modulesName}',
+          onProgress: (r, t) {
             task.downloadProgress = t > 0 ? r / t : null;
             notifyListeners();
-          });
+          },
+        );
+        if (kern.kernelUrl != null && kern.kernelName != null) {
+          kernFile = await _updates.downloadZip(
+            kern.kernelUrl!,
+            '$tmp/${kern.kernelName}',
+            onProgress: (r, t) {
+              task.downloadProgress = t > 0 ? r / t : null;
+              notifyListeners();
+            },
+          );
         }
         task.downloadProgress = 1;
         notifyListeners();
@@ -215,9 +223,19 @@ class UpdateController extends ChangeNotifier {
       notifyListeners();
 
       if (kern != null && modsFile != null) {
+        if (!kernelCompatibilityMatches(
+          kern.compatibility,
+          await _repo.updateCompatibility(),
+        )) {
+          throw Exception(
+            'Kernel update is incompatible with the current vendor firmware.',
+          );
+        }
         final res = await _repo.installModuleZip(modsFile.path);
         if (res.stdout.contains('NO_MODULE_MANAGER')) {
-          throw Exception('No KernelSU/Magisk CLI found to install the module.');
+          throw Exception(
+            'No KernelSU/Magisk CLI found to install the module.',
+          );
         }
         if (!res.ok) {
           throw Exception('Module install failed: ${res.errorSummary}');
@@ -225,11 +243,12 @@ class UpdateController extends ChangeNotifier {
         // Flash the boot image (AnyKernel3) to the chosen slot, and keep a copy
         // in Download as a manual-flash fallback.
         if (kernFile != null && kern.kernelName != null) {
-          final inactive = abDevice &&
-              selectedSlot.isNotEmpty &&
-              selectedSlot != activeSlot;
-          final fres =
-              await _repo.flashKernelZip(kernFile.path, inactiveSlot: inactive);
+          final inactive =
+              abDevice && selectedSlot.isNotEmpty && selectedSlot != activeSlot;
+          final fres = await _repo.flashKernelZip(
+            kernFile.path,
+            inactiveSlot: inactive,
+          );
           if (!fres.stdout.contains('AK3_EXIT:0') ||
               fres.stdout.toLowerCase().contains('abort')) {
             throw Exception('Kernel flash failed: ${fres.errorSummary}');
@@ -248,10 +267,13 @@ class UpdateController extends ChangeNotifier {
         updatePhase = UpdatePhase.downloading;
         notifyListeners();
         final task = updateTasks.firstWhere((t) => !t.isKernel);
-        apkFile = await _updates.download(app.apkUrl, onProgress: (r, t) {
-          task.downloadProgress = t > 0 ? r / t : null;
-          notifyListeners();
-        });
+        apkFile = await _updates.download(
+          app.apkUrl,
+          onProgress: (r, t) {
+            task.downloadProgress = t > 0 ? r / t : null;
+            notifyListeners();
+          },
+        );
         task.downloadProgress = 1;
         updatePhase = UpdatePhase.installing;
         notifyListeners();
