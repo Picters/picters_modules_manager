@@ -138,7 +138,7 @@ class MainActivity : FlutterActivity() {
                 "openRootManager" -> result.success(openRootManager())
                 "openKernelReleases" -> result.success(runCatching {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(
-                        "https://github.com/Picters/android_kernel_xiaomi_sm8850-extra/releases"
+                        "https://github.com/Picters/android_kernel_xiaomi_sm8850-extra/releases/latest"
                     )))
                     true
                 }.getOrDefault(false))

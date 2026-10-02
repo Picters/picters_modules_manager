@@ -25,7 +25,7 @@ class ReleasesController extends ChangeNotifier {
       final req = await client
           .getUrl(
             Uri.parse(
-              'https://api.github.com/repos/Picters/android_kernel_xiaomi_sm8850-extra/releases?per_page=30',
+              'https://api.github.com/repos/Picters/android_kernel_xiaomi_sm8850-extra/releases/latest',
             ),
           )
           .timeout(const Duration(seconds: 10));
@@ -36,10 +36,10 @@ class ReleasesController extends ChangeNotifier {
           .transform(utf8.decoder)
           .join()
           .timeout(const Duration(seconds: 10));
-      final releases = jsonDecode(body) as List;
+      final release = jsonDecode(body);
       if (!_disposed) {
         newReleaseAvailable =
-            newestManualReleaseCode(releases, channel: channel) > installed;
+            newestManualReleaseCode([release], channel: channel) > installed;
         notifyListeners();
       }
     } catch (_) {
