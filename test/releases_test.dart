@@ -52,4 +52,37 @@ void main() {
       0,
     );
   });
+  test('combined release notifies for each complete Android pair', () {
+    final combined = {
+      'tag_name': 'Mi17_Kernel-ReSuki-susfs-20261003-0027',
+      'assets': [
+        ...release('A16', '20261003-0027')['assets'],
+        ...release('A17', '20261003-0027')['assets'],
+      ],
+    };
+    expect(newestManualReleaseCode([combined], channel: 'A16'), 610030027);
+    expect(newestManualReleaseCode([combined], channel: 'A17'), 610030027);
+    expect(newestManualReleaseCode([combined], channel: 'A18'), 0);
+  });
+  test('combined release requires the pair for the selected channel', () {
+    final combined = {
+      'tag_name': 'Mi17_Kernel-ReSuki-susfs-20261003-0027',
+      'assets': release('A16', '20261003-0027')['assets'],
+    };
+    expect(newestManualReleaseCode([combined], channel: 'A16'), 610030027);
+    expect(newestManualReleaseCode([combined], channel: 'A17'), 0);
+  });
+  test('previous combined releases with legacy module names do not notify', () {
+    expect(
+      newestManualReleaseCode([
+        {
+          'tag_name': 'Mi17_Kernel-ReSuki-susfs-20260727-0620',
+          'assets': [
+            {'name': 'Mi17_Kernel-OOT-Modules-20260727-0620.zip'},
+          ],
+        },
+      ], channel: 'A16'),
+      0,
+    );
+  });
 }

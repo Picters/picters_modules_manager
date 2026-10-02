@@ -56,10 +56,15 @@ class ReleasesController extends ChangeNotifier {
   }
 }
 
-/// Only our new, explicitly separated manual release format creates a notice.
+/// Recognizes paired manual packages in a combined or channel-specific release.
 int newestManualReleaseCode(List<dynamic> releases, {String? channel}) {
   var newest = 0;
-  final tagPattern = RegExp(r'^(A16|A17)-(\d{8})-(\d{4})$');
+  final tagPattern = RegExp(
+    r'^(?:(A16|A17)|Mi17_Kernel-ReSuki-susfs)-(\d{8})-(\d{4})$',
+  );
+  if (channel != null && channel != 'A16' && channel != 'A17') {
+    return 0;
+  }
   for (final release in releases) {
     if (release is! Map ||
         release['draft'] == true ||
@@ -68,31 +73,43 @@ int newestManualReleaseCode(List<dynamic> releases, {String? channel}) {
     }
     final match = tagPattern.firstMatch(release['tag_name']?.toString() ?? '');
     if (match == null) continue;
-    final releaseChannel = match.group(1)!;
-    if (channel != null && releaseChannel != channel) continue;
+    final explicitChannel = match.group(1);
+    if (explicitChannel != null &&
+        channel != null &&
+        explicitChannel != channel) {
+      continue;
+    }
+    final channels = explicitChannel != null
+        ? [explicitChannel]
+        : channel != null
+        ? [channel]
+        : ['A16', 'A17'];
     final assets = release['assets'];
     if (assets is! List) continue;
     final names = assets.whereType<Map>().map((a) => a['name']).toSet();
-    final android = releaseChannel == 'A16' ? 'android16' : 'android17';
-    final stamp = '${match.group(2)}-${match.group(3)}';
-    final kernelPattern = RegExp(
-      '^Mi17_Kernel-[0-9]+\\.[0-9]+\\.[0-9]+-$android-[A-Za-z0-9._+-]+-$stamp\\.zip\$',
-    );
-    final modulesPattern = RegExp(
-      '^Mi17_OOTMODULES-[0-9]+\\.[0-9]+\\.[0-9]+-$android-[A-Za-z0-9._+-]+-$stamp\\.zip\$',
-    );
-    final kernelNames = names.whereType<String>().where(kernelPattern.hasMatch);
-    if (!kernelNames.any(
-      (name) =>
-          names.contains(
-            name.replaceFirst('Mi17_Kernel-', 'Mi17_OOTMODULES-'),
-          ) &&
-          modulesPattern.hasMatch(
-            name.replaceFirst('Mi17_Kernel-', 'Mi17_OOTMODULES-'),
-          ),
-    )) {
-      continue;
-    }
+    final hasPair = channels.any((releaseChannel) {
+      final android = releaseChannel == 'A16' ? 'android16' : 'android17';
+      final stamp = '${match.group(2)}-${match.group(3)}';
+      final kernelPattern = RegExp(
+        '^Mi17_Kernel-[0-9]+\\.[0-9]+\\.[0-9]+-$android-[A-Za-z0-9._+-]+-$stamp\\.zip\$',
+      );
+      final modulesPattern = RegExp(
+        '^Mi17_OOTMODULES-[0-9]+\\.[0-9]+\\.[0-9]+-$android-[A-Za-z0-9._+-]+-$stamp\\.zip\$',
+      );
+      final kernelNames = names.whereType<String>().where(
+        kernelPattern.hasMatch,
+      );
+      return kernelNames.any(
+        (name) =>
+            names.contains(
+              name.replaceFirst('Mi17_Kernel-', 'Mi17_OOTMODULES-'),
+            ) &&
+            modulesPattern.hasMatch(
+              name.replaceFirst('Mi17_Kernel-', 'Mi17_OOTMODULES-'),
+            ),
+      );
+    });
+    if (!hasPair) continue;
     final code =
         (int.parse(match.group(2)!) - 20200000) * 10000 +
         int.parse(match.group(3)!);
