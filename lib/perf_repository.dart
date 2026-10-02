@@ -111,9 +111,15 @@ class PerfRepository {
         gpu.availableFreqs,
       );
       b.writeln("echo $gfreq > '$kGpuMaxNode' || return 1");
+      // KGSL reports the effective ceiling, including thermal constraints.
+      // A successful restore may read below the requested stock maximum.
+      b.writeln("GACT=\"\$(cat '$kGpuMaxNode')\"");
       b.writeln(
-        "[ \"\$(cat '$kGpuMaxNode')\" = '$gfreq' ] || "
-        "{ echo 'GPU rejected the requested maximum'; return 1; }",
+        "case \"\$GACT\" in ''|*[!0-9]*) echo 'Invalid GPU maximum readback'; return 1 ;; esac",
+      );
+      b.writeln(
+        "[ \"\$GACT\" -gt 0 ] && [ \"\$GACT\" -le '$gfreq' ] || "
+        "{ echo 'GPU did not apply the requested ceiling'; return 1; }",
       );
       gpuLine = 'gpu $gfreq';
     }

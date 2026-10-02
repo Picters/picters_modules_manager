@@ -385,7 +385,7 @@ class _GpuRow extends StatelessWidget {
           _CapMeter(fraction: cap / gpu.stockMax, capped: capped),
         ],
       ),
-      trailing: ReelPill(text: formatGpuFreq(cap), highlight: capped),
+      trailing: ReelPill(text: profile == PerfProfile.full ? 'Max' : formatGpuFreq(cap), highlight: capped),
     );
   }
 }
