@@ -2,6 +2,10 @@
 
 Picters Modules Manager is distributed inside the matching A16 or A17 OOT modules pack. The app only reads release metadata and opens the kernel GitHub Releases page in your browser. It never downloads updates, installs APKs/modules or flashes boot partitions.
 
+**Install strictly for your Android version:** [A16 / Android 16 only](https://github.com/Picters/android_kernel_xiaomi_sm8850-extra/releases/tag/A16-20261003-0027) or [A17 / Android 17 only](https://github.com/Picters/android_kernel_xiaomi_sm8850-extra/releases/tag/A17-20261003-0027).
+
+**A17 Kernel not tested. The A17 kernel and Picters Modules Manager 1.3.2 have not been tested on Android 17 firmware. Vendor-module CRC compatibility and app/module functionality on A17 are unverified.**
+
 Choose the kernel and OOTMODULES package from the same channel and release. Install and boot the kernel first, then install its OOT pack through KernelSU/Magisk and reboot. The APK is included as a system app. CPU/GPU frequency controls remain available.
 
 # Picters Modules Manager
