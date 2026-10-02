@@ -1095,7 +1095,9 @@ class ReelPill extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+      width: 84,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: highlight ? scheme.primaryContainer : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),

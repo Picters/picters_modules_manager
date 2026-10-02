@@ -15,6 +15,10 @@ the module, links to GitHub Releases for manual updates, and opens from its Acti
 Because it ships as a system app, enable **Show system apps** in your KernelSU/Magisk manager to
 find it and grant Superuser the first time.
 
+## Performance
+
+CPU/GPU frequency chips keep a fixed width. The Full GPU profile displays **Max** and requests the hardware maximum; a lower thermal limit is accepted without reporting a profile-switch error.
+
 ## Build
 
 ```sh
