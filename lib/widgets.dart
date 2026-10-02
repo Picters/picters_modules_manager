@@ -1080,9 +1080,8 @@ class _ReelTextState extends State<ReelText> with SingleTickerProviderStateMixin
 }
 
 /// A pill like [CountPill], but its text reels ([ReelText]) between values
-/// instead of snapping, and the pill eases its own width/height to match.
-/// Built for the Performance tab's frequency chips, which cycle through
-/// numbers of very different lengths as the profile changes.
+/// instead of snapping. Frequency chips keep a compact fixed footprint
+/// when switching between values and Max.
 class ReelPill extends StatelessWidget {
   const ReelPill({super.key, required this.text, this.highlight = false});
 
@@ -1096,8 +1095,9 @@ class ReelPill extends StatelessWidget {
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeOutCubic,
       width: 84,
+      height: 30,
       alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: highlight ? scheme.primaryContainer : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
