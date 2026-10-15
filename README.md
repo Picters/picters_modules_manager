@@ -17,7 +17,7 @@ find it and grant Superuser the first time.
 
 ## Performance
 
-CPU/GPU frequency chips keep a fixed width. The Full GPU profile displays **Max** and requests the hardware maximum; a lower thermal limit is accepted without reporting a profile-switch error.
+CPU/GPU frequency chips keep a fixed width. The Full GPU profile displays **Max** and requests the hardware maximum.
 
 ## Build
 
