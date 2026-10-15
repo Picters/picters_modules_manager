@@ -1,8 +1,6 @@
 ## Manual release delivery
 
-Picters Modules Manager is distributed inside the matching A16 or A17 OOT modules pack. The app only reads release metadata and opens the latest kernel GitHub release in your browser. It never downloads updates, installs APKs/modules or flashes boot partitions.
-
-Install only the pair for your Android version; the A17 kernel and app have not been tested on Android 17 firmware.
+Picters Modules Manager is distributed inside the matching A16 or A17 OOT modules pack.
 
 Choose the kernel and OOTMODULES package from the same channel and release. Install and boot the kernel first, then install its OOT pack through KernelSU/Magisk and reboot. The APK is included as a system app. CPU/GPU frequency controls remain available.
 
