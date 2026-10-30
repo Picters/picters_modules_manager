@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'binder_root.dart';
+import 'preview_environment.dart';
 
 /// Result of a root-shell script run.
 class ShellResult {
@@ -52,6 +53,7 @@ class RootSession {
   bool get isAlive => _proc != null;
 
   Future<bool> ensureStarted() async {
+    if (PreviewEnvironment.enabled) return false;
     if (_proc != null) return true;
     try {
       final p = await Process.start('su', const <String>[]);
@@ -60,9 +62,9 @@ class RootSession {
       p.stdin.writeln('exec 2>&1');
       _proc = p;
       _lines = StreamQueue<String>(
-        p.stdout.transform(const Utf8Decoder(allowMalformed: true)).transform(
-              const LineSplitter(),
-            ),
+        p.stdout
+            .transform(const Utf8Decoder(allowMalformed: true))
+            .transform(const LineSplitter()),
       );
       // Probe: if root was denied the shell exits and this throws/times out.
       final probe = await _run('id', const Duration(seconds: 20));
@@ -84,6 +86,11 @@ class RootSession {
     String script, {
     Duration timeout = const Duration(seconds: 30),
   }) {
+    if (PreviewEnvironment.enabled) {
+      return Future.value(
+        const ShellResult(-1, 'Device commands are disabled in preview.'),
+      );
+    }
     final completer = Completer<ShellResult>();
     _lock = _lock.then((_) async {
       try {
@@ -228,8 +235,7 @@ class DefaultRootRunner implements RootRunner {
   Future<ShellResult> run(
     String script, {
     Duration timeout = const Duration(seconds: 30),
-  }) =>
-      RootShell.run(script, timeout: timeout);
+  }) => RootShell.run(script, timeout: timeout);
 }
 
 /// Facade used across the app. Routes each command through the AIDL/Binder root
@@ -240,11 +246,13 @@ class RootShell {
   /// stays wired as an automatic fallback either way.
   static const bool useBinderService = true;
 
-  static Future<bool> checkRoot() => RootSession.instance.checkRoot();
+  static Future<bool> checkRoot() async =>
+      !PreviewEnvironment.enabled && await RootSession.instance.checkRoot();
 
   /// Best-effort connect to the Binder root service (no-op unless
   /// [useBinderService]). Call once after root is granted.
   static Future<void> initBinder() async {
+    if (PreviewEnvironment.enabled) return;
     if (!useBinderService) return;
     await BinderRoot.instance.tryBind();
   }
@@ -253,6 +261,9 @@ class RootShell {
     String script, {
     Duration timeout = const Duration(seconds: 30),
   }) async {
+    if (PreviewEnvironment.enabled) {
+      return const ShellResult(-1, 'Device commands are disabled in preview.');
+    }
     if (useBinderService && BinderRoot.instance.ready) {
       try {
         return await BinderRoot.instance.exec(script, timeout);

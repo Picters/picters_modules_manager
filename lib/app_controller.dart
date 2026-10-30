@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'iw_repository.dart';
+import 'battery_reading.dart';
 import 'module_dependencies.dart';
 import 'module_info.dart';
 import 'module_repository.dart';
@@ -21,12 +22,19 @@ enum RootStatus { checking, granted, denied }
 /// don't rebuild on the scan; everything here funnels through the persistent
 /// root shell, so a poll is one cheap round-trip.
 class AppController extends ChangeNotifier {
-  AppController(ModuleRepository repo)
-      : _repo = repo,
-        releases = ReleasesController(repo),
-        settings = SettingsController(repo),
-        perf = PerfController(),
-        iw = IwRepository();
+  AppController(
+    ModuleRepository repo, {
+    PerfController? perfController,
+    IwRepository? iwRepository,
+    this.isPreview = false,
+  }) : _repo = repo,
+       releases = ReleasesController(repo),
+       settings = SettingsController(repo),
+       perf = perfController ?? PerfController(),
+       iw = iwRepository ?? IwRepository();
+
+  /// Demo repositories only; no device control or remote release requests.
+  final bool isPreview;
 
   final ModuleRepository _repo;
 
@@ -38,6 +46,9 @@ class AppController extends ChangeNotifier {
 
   /// Performance tab state (CPU/GPU frequency caps), likewise isolated.
   final PerfController perf;
+
+  /// Separate notifier so live battery readings do not rebuild the Wi-Fi UI.
+  final ValueNotifier<BatteryReading?> battery = ValueNotifier(null);
 
   /// Per-interface radio control (monitor/managed, up/down, region, tx power)
   /// backed by the bundled static `iw` binary — used by the adapter config panel.
@@ -75,12 +86,14 @@ class AppController extends ChangeNotifier {
   /// Records the intent before the root command goes out, so a kill between
   /// here and the reply leaves evidence behind.
   Future<void> _beginOp(PendingKind kind, String target, Duration timeout) =>
-      _pendingOps.write(PendingOp(
-        kind: kind,
-        target: target,
-        startedAt: DateTime.now(),
-        timeout: timeout,
-      ));
+      _pendingOps.write(
+        PendingOp(
+          kind: kind,
+          target: target,
+          startedAt: DateTime.now(),
+          timeout: timeout,
+        ),
+      );
 
   /// The command came back — nothing to recover.
   Future<void> _endOp() => _pendingOps.clear();
@@ -175,12 +188,12 @@ class AppController extends ChangeNotifier {
   Future<void> init() async {
     rootStatus = RootStatus.checking;
     notifyListeners();
-    final ok = await RootShell.checkRoot();
+    final ok = isPreview || await RootShell.checkRoot();
     if (_disposed) return;
     rootStatus = ok ? RootStatus.granted : RootStatus.denied;
     notifyListeners();
     if (ok) {
-      unawaited(RootShell.initBinder());
+      if (!isPreview) unawaited(RootShell.initBinder());
       // Load the Performance-tab flag in parallel with the first poll so the
       // shell knows the tab set before it reveals the chrome (no startup jerk).
       unawaited(settings.init());
@@ -191,8 +204,10 @@ class AppController extends ChangeNotifier {
       _startTimer();
       // After the first scan, so a resumed action is judged against real state
       // rather than the empty placeholder.
-      unawaited(_restorePendingOp());
-      unawaited(releases.init());
+      if (!isPreview) {
+        unawaited(_restorePendingOp());
+        unawaited(releases.init());
+      }
       unawaited(perf.init());
       unawaited(_checkKernelAuthentic());
     } else {
@@ -247,15 +262,15 @@ class AppController extends ChangeNotifier {
     if (rootStatus == RootStatus.granted || recheckingRoot) return;
     recheckingRoot = true;
     notifyListeners();
-    final ok = await RootShell.checkRoot();
+    final ok = isPreview || await RootShell.checkRoot();
     recheckingRoot = false;
     if (ok) {
       rootStatus = RootStatus.granted;
       notifyListeners();
-      unawaited(RootShell.initBinder());
+      if (!isPreview) unawaited(RootShell.initBinder());
       await _pollOnce(force: true);
       _startTimer();
-      unawaited(releases.init());
+      if (!isPreview) unawaited(releases.init());
       unawaited(settings.init());
       unawaited(perf.init());
       unawaited(_checkKernelAuthentic());
@@ -272,7 +287,7 @@ class AppController extends ChangeNotifier {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (!_foreground) return;
-      final ok = await RootShell.checkRoot();
+      final ok = isPreview || await RootShell.checkRoot();
       if (ok) {
         rootStatus = RootStatus.granted;
         notifyListeners();
@@ -311,6 +326,8 @@ class AppController extends ChangeNotifier {
       // Dropped if a transition began while the scan was in flight — the
       // resume-time forced poll will pick the change back up.
       if (_pollPaused && !force) return;
+      if (_disposed) return;
+      battery.value = next.battery;
       final changed = next.fingerprint != _lastFingerprint;
       if (force || changed) {
         _lastFingerprint = next.fingerprint;
@@ -318,7 +335,9 @@ class AppController extends ChangeNotifier {
         notifyListeners();
         _maybeRestoreTx();
       }
-      _pollInterval = nextPollInterval(_pollInterval, changed: changed || force);
+      _pollInterval = next.battery != null
+          ? const Duration(seconds: 1)
+          : nextPollInterval(_pollInterval, changed: changed || force);
     } catch (_) {
       // Transient — the next tick retries.
     } finally {
@@ -450,7 +469,8 @@ class AppController extends ChangeNotifier {
         orElse: () => module,
       );
       if (now.loaded != want) {
-        error = '${want ? 'Failed to load' : 'Failed to unload'} ${module.name}: '
+        error =
+            '${want ? 'Failed to load' : 'Failed to unload'} ${module.name}: '
             '${_repo.loadErrorSummary(result)}';
       }
     } on ModulePrecondition catch (e) {
@@ -471,7 +491,9 @@ class AppController extends ChangeNotifier {
   /// A plain toggle would fail with "Unknown symbol", so this is its own path.
   Future<String?> enableRndisHost(ModuleInfo module) async {
     const ce = 'cdc_ether';
-    if (moduleBusy.contains(module.name) || moduleBusy.contains(ce)) return null;
+    if (moduleBusy.contains(module.name) || moduleBusy.contains(ce)) {
+      return null;
+    }
     moduleBusy.add(module.name);
     moduleBusy.add(ce);
     moduleErrors.remove(module.name);
@@ -508,7 +530,8 @@ class AppController extends ChangeNotifier {
   /// Fetches a module's dmesg tail on demand — only when the user taps its
   /// error icon, so a failed toggle never holds the serialized root shell
   /// collecting logs (which used to stall the next module's toggle).
-  Future<String> fetchModuleDmesg(ModuleInfo module) => _repo.moduleDmesg(module);
+  Future<String> fetchModuleDmesg(ModuleInfo module) =>
+      _repo.moduleDmesg(module);
 
   // ── Dependency-aware load / unload ──────────────────────────────────────
 
@@ -520,30 +543,31 @@ class AppController extends ChangeNotifier {
   }
 
   Set<String> get _availableNames => {for (final m in state.modules) m.name};
-  Set<String> get _loadedNames =>
-      {for (final m in state.modules) if (m.loaded) m.name};
+  Set<String> get _loadedNames => {
+    for (final m in state.modules)
+      if (m.loaded) m.name,
+  };
 
   /// What flipping [module] on needs right now: dependencies to load first, or
   /// (for a Wi-Fi driver in Stock mode) Inject mode to be enabled.
   DependencyPlan planFor(ModuleInfo module) => planModuleLoad(
-        target: module.name,
-        available: _availableNames,
-        loaded: _loadedNames,
-        injectActive: state.wifiMode == WifiMode.inject,
-      );
+    target: module.name,
+    available: _availableNames,
+    loaded: _loadedNames,
+    injectActive: state.wifiMode == WifiMode.inject,
+  );
 
   /// Currently-loaded modules that depend on [module] — the ones an `rmmod`
   /// would otherwise fail on with "Module is in use".
   List<String> loadedDependentsOf(ModuleInfo module) => loadedDependents(
-        target: module.name,
-        available: _availableNames,
-        loaded: _loadedNames,
-      );
+    target: module.name,
+    available: _availableNames,
+    loaded: _loadedNames,
+  );
 
   /// Loads [depNames] (in order) then [target] in a single root round-trip,
   /// surfacing an error on whichever module actually failed.
-  Future<String?> loadModuleWithDeps(
-      ModuleInfo target, List<String> depNames) {
+  Future<String?> loadModuleWithDeps(ModuleInfo target, List<String> depNames) {
     final ordered = <ModuleInfo>[
       for (final n in depNames)
         _moduleByName(n) ??
@@ -555,7 +579,9 @@ class AppController extends ChangeNotifier {
 
   /// Unloads [dependents] (in order) then [target].
   Future<String?> unloadModuleWithDependents(
-      ModuleInfo target, List<String> dependents) {
+    ModuleInfo target,
+    List<String> dependents,
+  ) {
     final ordered = <ModuleInfo>[
       for (final n in dependents)
         _moduleByName(n) ??
@@ -585,14 +611,16 @@ class AppController extends ChangeNotifier {
     );
     String? error;
     try {
-      final result =
-          await (load ? _repo.loadChain(ordered) : _repo.unloadChain(ordered));
+      final result = await (load
+          ? _repo.loadChain(ordered)
+          : _repo.unloadChain(ordered));
       final after = await _repo.scan();
       state = after;
       _lastFingerprint = after.fingerprint;
       final failed = _repo.chainFailure(result);
       if (failed != null) {
-        error = '${load ? 'Failed to load' : 'Failed to unload'} $failed: '
+        error =
+            '${load ? 'Failed to load' : 'Failed to unload'} $failed: '
             '${_repo.loadErrorSummary(result)}';
         moduleErrors[failed] = error;
       }
@@ -638,7 +666,10 @@ class AppController extends ChangeNotifier {
   /// USB Wi-Fi chipset drivers — used to tell an external adapter's interface
   /// apart from the internal Wi-Fi and to pick what Reconfigure reloads.
   static const Set<String> _chipsetDrivers = {
-    '88XXau', '8188eu', '8814au', '88x2bu',
+    '88XXau',
+    '8188eu',
+    '8814au',
+    '88x2bu',
   };
 
   /// The loaded USB Wi-Fi chipset driver, if any (first match).
@@ -659,11 +690,11 @@ class AppController extends ChangeNotifier {
   /// `wlanX` as an external adapter. Outside Inject mode, fall back to the exact
   /// chipset-driver match so the built-in interface is never picked up.
   List<WifiInterface> get adapterInterfaces => [
-        for (final i in state.interfaces)
-          if (_chipsetDrivers.contains(i.driver) ||
-              (state.wifiMode == WifiMode.inject && i.name.startsWith('wlan')))
-            i,
-      ];
+    for (final i in state.interfaces)
+      if (_chipsetDrivers.contains(i.driver) ||
+          (state.wifiMode == WifiMode.inject && i.name.startsWith('wlan')))
+        i,
+  ];
 
   /// Adapter ifaces whose saved tx power we've already restored this plug-in,
   /// so the recurring poll doesn't re-apply every second. Cleared on unplug.
@@ -698,7 +729,8 @@ class AppController extends ChangeNotifier {
   String chipTextFor(WifiInterface iface) {
     for (final a in state.adapters) {
       if (a.recognized &&
-          (a.match!.driver == iface.driver || a.device.driver == iface.driver)) {
+          (a.match!.driver == iface.driver ||
+              a.device.driver == iface.driver)) {
         return '${a.match!.label} ${a.device.driver} ${iface.driver}';
       }
     }
@@ -736,7 +768,8 @@ class AppController extends ChangeNotifier {
     // For a driver reload we need the real .ko basename (e.g. "88XXau"), not the
     // sysfs driver-name variant an interface reports — so prefer the explicit
     // arg / the loaded chipset module, and only fall back to the iface's driver.
-    final driver = chipsetDriver ??
+    final driver =
+        chipsetDriver ??
         loadedAdapterDriver ??
         (target != null && target.driver.isNotEmpty ? target.driver : null);
     if (driver == null || driver.isEmpty) {
@@ -760,7 +793,8 @@ class AppController extends ChangeNotifier {
         reloadDriver: reload,
       );
       if (r.stdout.contains('NO_IFACE') || !r.stdout.contains('OK_RECONFIG')) {
-        error = 'Reconfigure could not bring up the interface: ${r.errorSummary}';
+        error =
+            'Reconfigure could not bring up the interface: ${r.errorSummary}';
       }
     } catch (e) {
       error = 'Error: $e';
@@ -790,6 +824,7 @@ class AppController extends ChangeNotifier {
     releases.dispose();
     settings.dispose();
     perf.dispose();
+    battery.dispose();
     super.dispose();
   }
 }

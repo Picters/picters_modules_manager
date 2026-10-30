@@ -17,9 +17,6 @@ class SettingsController extends ChangeNotifier {
   bool bootLoadEnabled = false;
   bool bootLoadBusy = false;
 
-  /// Hides the Performance tab when true.
-  bool hidePerformance = false;
-
   /// True once the persisted flags have been read at least once. The shell holds
   /// the first paint of the tab chrome until this flips, so the Performance tab
   /// is never shown-then-collapsed (no startup jerk).
@@ -27,10 +24,7 @@ class SettingsController extends ChangeNotifier {
 
   /// Reads the persisted flags. Called once root is granted.
   Future<void> init() async {
-    await Future.wait([
-      _refreshBootLoadEnabled(),
-      _refreshHidePerformance(),
-    ]);
+    await Future.wait([_refreshBootLoadEnabled()]);
     loaded = true;
     notifyListeners();
   }
@@ -53,21 +47,6 @@ class SettingsController extends ChangeNotifier {
       bootLoadBusy = false;
       notifyListeners();
     }
-  }
-
-  Future<void> _refreshHidePerformance() async {
-    final v = await _repo.hidePerformance();
-    if (_disposed) return;
-    hidePerformance = v;
-    notifyListeners();
-  }
-
-  /// Toggles the Performance tab. Optimistic so the tab list flips instantly.
-  Future<void> setHidePerformance(bool value) async {
-    if (hidePerformance == value) return;
-    hidePerformance = value;
-    notifyListeners();
-    await _repo.setHidePerformance(value);
   }
 
   // ── Debug log bundle ─────────────────────────────────────────────────────

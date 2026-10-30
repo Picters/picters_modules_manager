@@ -15,6 +15,7 @@ import 'widgets.dart';
 ///   so rt73usb / rtl8187 resolve their selected symbols); they auto-load as
 ///   deps and aren't standalone drivers, so a toggle row for them only confuses.
 const Set<String> _hiddenModules = {
+  'picters_charging',
   'cfg80211',
   'mac80211',
   'crc-itu-t',
@@ -47,6 +48,10 @@ class _ModulesScreenState extends State<ModulesScreen> {
   }
 
   Future<void> _toggle(ModuleInfo m, bool want) async {
+    if (m.isWifiClass &&
+        (controller.state.wifiMode != WifiMode.inject || controller.wifiBusy)) {
+      return;
+    }
     HapticFeedback.selectionClick();
     if (want) {
       // rndis_host needs our cdc_ether (the boot one hides the symbols it uses),
@@ -71,13 +76,15 @@ class _ModulesScreenState extends State<ModulesScreen> {
       // enable those in place instead of surfacing a cryptic kernel error.
       final plan = controller.planFor(m);
       if (plan.needsInjectMode) {
-        showError(
-            context, 'Enable Inject mode on the Overview screen first.');
+        showError(context, 'Enable Inject mode on the Overview screen first.');
         return;
       }
       if (plan.hasMissingDeps) {
-        final ok =
-            await showDependencyDialog(context, module: m.name, deps: plan.toLoad);
+        final ok = await showDependencyDialog(
+          context,
+          module: m.name,
+          deps: plan.toLoad,
+        );
         if (ok != true || !mounted) return;
         await controller.loadModuleWithDeps(m, plan.toLoad);
         return;
@@ -88,8 +95,11 @@ class _ModulesScreenState extends State<ModulesScreen> {
       // up; offer to unload them first instead of a bare "Module is in use".
       final dependents = controller.loadedDependentsOf(m);
       if (dependents.isNotEmpty) {
-        final ok = await showDependentsDialog(context,
-            module: m.name, dependents: dependents);
+        final ok = await showDependentsDialog(
+          context,
+          module: m.name,
+          dependents: dependents,
+        );
         if (ok != true || !mounted) return;
         await controller.unloadModuleWithDependents(m, dependents);
         return;
@@ -105,10 +115,7 @@ class _ModulesScreenState extends State<ModulesScreen> {
     final message = controller.moduleErrors[m.name];
     final dmesg = await controller.fetchModuleDmesg(m);
     if (!mounted) return;
-    final parts = <String>[
-      ?message,
-      if (dmesg.isNotEmpty) dmesg,
-    ];
+    final parts = <String>[?message, if (dmesg.isNotEmpty) dmesg];
     showDiagnosticsDialog(context, parts.join('\n\n'));
   }
 
@@ -118,22 +125,27 @@ class _ModulesScreenState extends State<ModulesScreen> {
       animation: controller,
       builder: (context, _) {
         final state = controller.state;
-        final modules =
-            state.modules.where((m) => !_hiddenModules.contains(m.name)).toList();
+        final modules = state.modules
+            .where((m) => !_hiddenModules.contains(m.name))
+            .toList();
 
         if (!state.modulesDirExists || modules.isEmpty) {
           return _EmptyModules(onRetry: controller.refresh);
         }
 
-        final visible = modules.where((m) => switch (_filter) {
-              _LoadFilter.all => true,
-              _LoadFilter.loaded => m.loaded,
-              _LoadFilter.unloaded => !m.loaded,
-            }).toList();
+        final visible = modules
+            .where(
+              (m) => switch (_filter) {
+                _LoadFilter.all => true,
+                _LoadFilter.loaded => m.loaded,
+                _LoadFilter.unloaded => !m.loaded,
+              },
+            )
+            .toList();
 
         return PolygonScrollView(
           onRefresh: controller.refresh,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
           children: [
             _SearchField(
               controller: _search,
@@ -157,16 +169,22 @@ class _ModulesScreenState extends State<ModulesScreen> {
     );
   }
 
-  List<Widget> _buildSearchResults(BuildContext context, List<ModuleInfo> modules) {
-    final matches =
-        modules.where((m) => m.name.toLowerCase().contains(_query)).toList();
+  List<Widget> _buildSearchResults(
+    BuildContext context,
+    List<ModuleInfo> modules,
+  ) {
+    final matches = modules
+        .where((m) => m.name.toLowerCase().contains(_query))
+        .toList();
     if (matches.isEmpty) {
       return [
         const SizedBox(height: 40),
         Center(
           child: Text(
             'No module matches "$_query".',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       ];
@@ -226,8 +244,7 @@ class _ModulesScreenState extends State<ModulesScreen> {
   }
 }
 
-/// The All / Loaded / Unloaded segmented filter above the module list. Reuses
-/// the app's themed SegmentedButton so it matches the Overview Wi-Fi toggle.
+/// A shared track with one sliding selection, matching the app controls.
 class _FilterBar extends StatelessWidget {
   const _FilterBar({required this.filter, required this.onChanged});
 
@@ -235,24 +252,20 @@ class _FilterBar extends StatelessWidget {
   final ValueChanged<_LoadFilter> onChanged;
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: SegmentedButton<_LoadFilter>(
-        segments: const [
-          ButtonSegment(value: _LoadFilter.all, label: Text('All')),
-          ButtonSegment(value: _LoadFilter.loaded, label: Text('Loaded')),
-          ButtonSegment(value: _LoadFilter.unloaded, label: Text('Unloaded')),
-        ],
-        selected: {filter},
-        showSelectedIcon: false,
-        onSelectionChanged: (s) {
-          HapticFeedback.selectionClick();
-          onChanged(s.first);
-        },
-      ),
-    );
-  }
+  Widget build(BuildContext context) => JellySegmented<_LoadFilter>(
+    backgroundColor: Theme.of(context).cardTheme.color,
+    values: _LoadFilter.values,
+    selected: filter,
+    labelOf: (value) => switch (value) {
+      _LoadFilter.all => 'All',
+      _LoadFilter.loaded => 'Loaded',
+      _LoadFilter.unloaded => 'Unloaded',
+    },
+    onSelect: (value) async {
+      HapticFeedback.selectionClick();
+      onChanged(value);
+    },
+  );
 }
 
 /// Shown when the active filter leaves nothing to list.
@@ -275,7 +288,11 @@ class _FilterEmpty extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.filter_list_off, size: 40, color: scheme.onSurfaceVariant),
+            Icon(
+              Icons.filter_list_off,
+              size: 40,
+              color: scheme.onSurfaceVariant,
+            ),
             const SizedBox(height: 12),
             Text(message, style: TextStyle(color: scheme.onSurfaceVariant)),
           ],
@@ -296,6 +313,7 @@ class _SearchField extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return TextField(
       controller: controller,
+      style: Theme.of(context).textTheme.bodyMedium,
       onChanged: onChanged,
       textInputAction: TextInputAction.search,
       decoration: InputDecoration(
@@ -305,19 +323,34 @@ class _SearchField extends StatelessWidget {
           valueListenable: controller,
           builder: (context, value, _) => value.text.isEmpty
               ? const SizedBox.shrink()
-              : Jelly(child: IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () {
-                    controller.clear();
-                    onChanged('');
-                  },
-                )),
+              : Jelly(
+                  child: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      controller.clear();
+                      onChanged('');
+                    },
+                  ),
+                ),
         ),
         filled: true,
-        fillColor: scheme.surfaceContainerHighest,
-        contentPadding: EdgeInsets.zero,
+        fillColor: scheme.surfaceContainerLow,
+        isDense: true,
+        constraints: const BoxConstraints(minHeight: 44, maxHeight: 44),
+        prefixIconConstraints: const BoxConstraints(
+          minWidth: 44,
+          minHeight: 44,
+        ),
+        suffixIconConstraints: const BoxConstraints(
+          minWidth: 44,
+          minHeight: 44,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 10,
+        ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(Corners.field),
+          borderRadius: BorderRadius.circular(22),
           borderSide: BorderSide.none,
         ),
       ),
@@ -345,6 +378,7 @@ class _ModuleGroup extends StatefulWidget {
   final IconData icon;
   final List<ModuleInfo> modules;
   final AppController controller;
+
   /// Returns a future the row awaits before giving up its optimistic position:
   /// this can end in a confirmation the user declines, in which case nothing
   /// changes and there is no state update to reconcile against.
@@ -373,120 +407,158 @@ class _ModuleGroupState extends State<_ModuleGroup> {
     final controller = widget.controller;
     final total = modules.length;
     final on = modules.where((m) => m.loaded).length;
-    final hasError =
-        modules.any((m) => controller.moduleErrors.containsKey(m.name));
-    final active = on > 0;
+    final hasError = modules.any(
+      (m) => controller.moduleErrors.containsKey(m.name),
+    );
+    final wifiBlocked =
+        controller.state.wifiMode != WifiMode.inject || controller.wifiBusy;
+    final enabled = !modules.every((m) => m.isWifiClass) || !wifiBlocked;
+    final active = enabled && on > 0;
 
-    return RepaintBoundary(child: Card.outlined(
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          JellyTap(
-            onTap: _toggle,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-              child: Row(
-                children: [
-                  // Leading category icon — anchors the block and fills the
-                  // left space so the header reads as a real, substantial row.
-                  Container(
-                    width: 46,
-                    height: 46,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: active
-                          ? scheme.primaryContainer
-                          : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: Icon(
-                      widget.icon,
-                      size: 23,
-                      color: active
-                          ? scheme.onPrimaryContainer
-                          : scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+    return RepaintBoundary(
+      child: IgnorePointer(
+        ignoring: !enabled,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 180),
+          opacity: enabled ? 1 : 0.38,
+          child: Card.outlined(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                JellyTap(
+                  onTap: enabled ? _toggle : null,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                    child: Row(
                       children: [
-                        Text(
-                          widget.label,
-                          style: textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: scheme.onSurface,
+                        // Leading category icon — anchors the block and fills the
+                        // left space so the header reads as a real, substantial row.
+                        Container(
+                          width: 46,
+                          height: 46,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: active
+                                ? scheme.primaryContainer
+                                : scheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          child: Icon(
+                            widget.icon,
+                            size: 23,
+                            color: active
+                                ? scheme.onPrimaryContainer
+                                : scheme.onSurfaceVariant,
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          active ? '$on of $total loaded' : '$total available',
-                          style: textTheme.bodySmall
-                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.label,
+                                style: textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: scheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                active
+                                    ? '$on of $total loaded'
+                                    : '$total available',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (hasError) ...[
+                          Icon(
+                            Icons.error_outline,
+                            color: scheme.error,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        AnimatedRotation(
+                          turns: _expanded ? 0.5 : 0.0,
+                          duration: const Duration(milliseconds: 240),
+                          curve: Curves.easeOutCubic,
+                          child: Icon(
+                            Icons.expand_more,
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  if (hasError) ...[
-                    Icon(Icons.error_outline, color: scheme.error, size: 20),
-                    const SizedBox(width: 10),
-                  ],
-                  AnimatedRotation(
-                    turns: _expanded ? 0.5 : 0.0,
-                    duration: const Duration(milliseconds: 240),
-                    curve: Curves.easeOutCubic,
-                    child: Icon(Icons.expand_more, color: scheme.onSurfaceVariant),
+                ),
+                AnimatedCrossFade(
+                  firstChild: const SizedBox(width: double.infinity, height: 0),
+                  secondChild: Column(
+                    children: [
+                      const CardDivider(),
+                      for (var i = 0; i < modules.length; i++) ...[
+                        if (i > 0) const CardDivider(),
+                        IgnorePointer(
+                          ignoring: modules[i].isWifiClass && wifiBlocked,
+                          child: Opacity(
+                            opacity:
+                                enabled && modules[i].isWifiClass && wifiBlocked
+                                ? 0.38
+                                : 1,
+                            child: _ModuleRow(
+                              module: modules[i],
+                              busy: controller.moduleBusy.contains(
+                                modules[i].name,
+                              ),
+                              hasError: controller.moduleErrors.containsKey(
+                                modules[i].name,
+                              ),
+                              optimisticLoaded: controller
+                                  .optimisticModuleLoaded[modules[i].name],
+                              onChanged: (v) => widget.onToggle(modules[i], v),
+                              onShowError: () => widget.onShowError(modules[i]),
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          ),
-          AnimatedCrossFade(
-            firstChild: const SizedBox(width: double.infinity, height: 0),
-            secondChild: Column(
-              children: [
-                const CardDivider(),
-                for (var i = 0; i < modules.length; i++) ...[
-                  if (i > 0) const CardDivider(),
-                  _ModuleRow(
-                    module: modules[i],
-                    busy: controller.moduleBusy.contains(modules[i].name),
-                    hasError: controller.moduleErrors.containsKey(modules[i].name),
-                    optimisticLoaded: controller.optimisticModuleLoaded[modules[i].name],
-                    onChanged: (v) => widget.onToggle(modules[i], v),
-                    onShowError: () => widget.onShowError(modules[i]),
-                  ),
-                ],
-                const SizedBox(height: 4),
+                  crossFadeState: _expanded && enabled
+                      ? CrossFadeState.showSecond
+                      : CrossFadeState.showFirst,
+                  duration: const Duration(milliseconds: 240),
+                  sizeCurve: Curves.easeOutCubic,
+                  firstCurve: Curves.easeOut,
+                  secondCurve: Curves.easeOut,
+                ),
               ],
             ),
-            crossFadeState:
-                _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 240),
-            sizeCurve: Curves.easeOutCubic,
-            firstCurve: Curves.easeOut,
-            secondCurve: Curves.easeOut,
           ),
-        ],
+        ),
       ),
-    ));
+    );
   }
 }
 
 /// A representative icon per module group, so each expander header carries a
 /// recognisable glyph instead of empty space.
 IconData _categoryIcon(ModuleCategory cat) => switch (cat) {
-      ModuleCategory.bluetooth => Icons.bluetooth,
-      ModuleCategory.can => Icons.directions_car_filled_outlined,
-      ModuleCategory.sdr => Icons.settings_input_antenna,
-      ModuleCategory.usbSerial => Icons.cable,
-      ModuleCategory.usbEthernet => Icons.lan_outlined,
-      ModuleCategory.netfilter => Icons.shield_outlined,
-      ModuleCategory.filesystem => Icons.folder_outlined,
-      ModuleCategory.other => Icons.extension_outlined,
-    };
+  ModuleCategory.bluetooth => Icons.bluetooth,
+  ModuleCategory.can => Icons.directions_car_filled_outlined,
+  ModuleCategory.sdr => Icons.settings_input_antenna,
+  ModuleCategory.usbSerial => Icons.cable,
+  ModuleCategory.usbEthernet => Icons.lan_outlined,
+  ModuleCategory.netfilter => Icons.shield_outlined,
+  ModuleCategory.filesystem => Icons.folder_outlined,
+  ModuleCategory.other => Icons.extension_outlined,
+};
 
 class _ModuleRow extends StatefulWidget {
   const _ModuleRow({
@@ -583,14 +655,16 @@ class _ModuleRowState extends State<_ModuleRow> {
               MorphingPolygon(size: 18, color: scheme.primary),
               const SizedBox(width: 12),
             ] else if (widget.hasError) ...[
-              Jelly(child: IconButton(
-                visualDensity: VisualDensity.compact,
-                iconSize: 20,
-                color: scheme.error,
-                icon: const Icon(Icons.error_outline),
-                tooltip: 'Show error',
-                onPressed: widget.onShowError,
-              )),
+              Jelly(
+                child: IconButton(
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 20,
+                  color: scheme.error,
+                  icon: const Icon(Icons.error_outline),
+                  tooltip: 'Show error',
+                  onPressed: widget.onShowError,
+                ),
+              ),
               const SizedBox(width: 4),
             ],
             JellySwitch(value: _shown, onChanged: (_) => _toggle()),
@@ -618,7 +692,11 @@ class _EmptyModules extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
             child: Column(
               children: [
-                Icon(Icons.inventory_2_outlined, size: 48, color: scheme.onSurfaceVariant),
+                Icon(
+                  Icons.inventory_2_outlined,
+                  size: 48,
+                  color: scheme.onSurfaceVariant,
+                ),
                 const SizedBox(height: 16),
                 Text(
                   'No OOT modules found',
@@ -630,10 +708,9 @@ class _EmptyModules extends StatelessWidget {
                   'Install the OOT modules zip in KernelSU or Magisk, then '
                   'reopen the app.',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: scheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),

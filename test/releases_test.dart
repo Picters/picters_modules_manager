@@ -2,7 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:picters_modules_manager/releases_controller.dart';
 
 void main() {
-  Map<String, dynamic> release(String channel, String stamp) => {
+  Map<String, dynamic> release(
+    String channel,
+    String stamp, {
+    String packPrefix = 'Mi17_SystemPack',
+  }) => {
     'tag_name': '$channel-$stamp',
     'assets': [
       {
@@ -11,7 +15,7 @@ void main() {
       },
       {
         'name':
-            'Mi17_OOTMODULES-6.12.23-android${channel.substring(1)}-picters-ReSuki-g123-susfs-$stamp.zip',
+            '$packPrefix-6.12.23-android${channel.substring(1)}-picters-ReSuki-g123-susfs-$stamp.zip',
       },
     ],
   };
@@ -27,6 +31,23 @@ void main() {
       ]),
       610010030,
     );
+  });
+  test('published OOTMODULES pairs still create a release notice', () {
+    expect(
+      newestManualReleaseCode([
+        release('A16', '20261003-0027', packPrefix: 'Mi17_OOTMODULES'),
+      ], channel: 'A16'),
+      610030027,
+    );
+  });
+  test('SystemPack must match the complete kernel filename', () {
+    final mismatched = release('A16', '20261030-1200');
+    final assets = mismatched['assets'] as List;
+    assets[1]['name'] = (assets[1]['name'] as String).replaceFirst(
+      '6.12.23',
+      '6.12.69',
+    );
+    expect(newestManualReleaseCode([mismatched], channel: 'A16'), 0);
   });
   test('a different channel never creates a release notice', () {
     expect(

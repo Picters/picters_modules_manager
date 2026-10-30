@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'adapter_panel.dart';
 import 'app_controller.dart';
+import 'battery_card.dart';
 import 'module_info.dart';
 import 'theme.dart';
 import 'tx_profiles.dart';
@@ -42,7 +43,9 @@ class OverviewScreen extends StatelessWidget {
     } else {
       showInfo(
         context,
-        target == WifiMode.stock ? 'Stock Wi-Fi restored.' : 'Inject mode enabled.',
+        target == WifiMode.stock
+            ? 'Stock Wi-Fi restored.'
+            : 'Inject mode enabled.',
       );
     }
   }
@@ -62,23 +65,31 @@ class OverviewScreen extends StatelessWidget {
         ),
         actions: [
           if (controller.lastWifiSwitchDiagnostics != null)
-            Jelly(child: TextButton(
-              onPressed: () {
-                Navigator.of(ctx).pop(false);
-                showDiagnosticsDialog(
-                    context, controller.lastWifiSwitchDiagnostics!);
-              },
-              child: const Text('Details'),
-            )),
-          Jelly(child: TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Later'),
-          )),
-          Jelly(child: FilledButton.icon(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            icon: const Icon(Icons.restart_alt, size: 18),
-            label: const Text('Reboot'),
-          )),
+            Jelly(
+              child: TextButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop(false);
+                  showDiagnosticsDialog(
+                    context,
+                    controller.lastWifiSwitchDiagnostics!,
+                  );
+                },
+                child: const Text('Details'),
+              ),
+            ),
+          Jelly(
+            child: TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Later'),
+            ),
+          ),
+          Jelly(
+            child: FilledButton.icon(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              icon: const Icon(Icons.restart_alt, size: 18),
+              label: const Text('Reboot'),
+            ),
+          ),
         ],
       ),
     );
@@ -143,15 +154,14 @@ class OverviewScreen extends StatelessWidget {
         // Every plugged-in device, not just the Wi-Fi adapters we recognise —
         // minus USB hubs (the phone's own root hubs), which are just noise.
         // Recognised Wi-Fi adapters (the actionable ones) float to the top.
-        final devices = state.adapters
-            .where((a) => classifyUsb(a) != UsbKind.hub)
-            .toList()
-          ..sort((a, b) {
-            if (a.recognized != b.recognized) return a.recognized ? -1 : 1;
-            return a.device.displayName
-                .toLowerCase()
-                .compareTo(b.device.displayName.toLowerCase());
-          });
+        final devices =
+            state.adapters.where((a) => classifyUsb(a) != UsbKind.hub).toList()
+              ..sort((a, b) {
+                if (a.recognized != b.recognized) return a.recognized ? -1 : 1;
+                return a.device.displayName.toLowerCase().compareTo(
+                  b.device.displayName.toLowerCase(),
+                );
+              });
 
         // Resolved once for the whole list rather than per row: the pairing has
         // to know which interfaces are already spoken for, which a per-row
@@ -171,6 +181,11 @@ class OverviewScreen extends StatelessWidget {
               onSelect: (m) => _setWifi(context, m),
               onReboot: () => _reboot(context),
               onReconfigure: () => _reconfigure(context),
+            ),
+            const SizedBox(height: 14),
+            ValueListenableBuilder(
+              valueListenable: controller.battery,
+              builder: (context, reading, _) => BatteryCard(reading: reading),
             ),
             const SizedBox(height: 26),
             SectionHeader(
@@ -212,7 +227,8 @@ class OverviewScreen extends StatelessWidget {
                                         ? ifaces[i]
                                         : null,
                                     controller: controller,
-                                    busy: devices[i].recognized &&
+                                    busy:
+                                        devices[i].recognized &&
                                         controller.moduleBusy.contains(
                                           devices[i].match!.driver,
                                         ),
@@ -231,7 +247,6 @@ class OverviewScreen extends StatelessWidget {
       },
     );
   }
-
 }
 
 class _WifiHeroCard extends StatelessWidget {
@@ -258,29 +273,11 @@ class _WifiHeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final inj = mode == WifiMode.inject;
-
-    final Color background;
-    final Color borderColor;
-    if (needsReboot) {
-      // A caution tint so the armed-reboot state stands apart from the neutral
-      // icon tile and the segmented track (all three used to share one tone).
-      background = Color.alphaBlend(
-        scheme.error.withValues(alpha: 0.10),
-        scheme.surfaceContainerHigh,
-      );
-      borderColor = scheme.error.withValues(alpha: 0.45);
-    } else {
-      background = inj
-          ? Color.alphaBlend(
-              scheme.primary.withValues(alpha: 0.09),
-              scheme.surfaceContainerHigh,
-            )
-          : scheme.surfaceContainerHigh;
-      borderColor = inj
-          ? scheme.primary.withValues(alpha: 0.45)
-          : Colors.transparent;
-    }
+    final background =
+        Theme.of(context).cardTheme.color ?? scheme.surfaceContainer;
+    final borderColor = needsReboot
+        ? scheme.error.withValues(alpha: 0.45)
+        : Colors.transparent;
 
     // The shell colour/border animate (AnimatedContainer). The card keeps ONE
     // layout at all times — icon row + the sliding segmented switch — so the
@@ -290,7 +287,7 @@ class _WifiHeroCard extends StatelessWidget {
     return RepaintBoundary(
       child: _HeroShell(
         background: background,
-        border: Border.all(color: borderColor, width: 1.5),
+        border: Border.all(color: borderColor),
         child: AnimatedSize(
           duration: const Duration(milliseconds: 340),
           curve: Curves.easeOutCubic,
@@ -319,23 +316,25 @@ class _WifiHeroCard extends StatelessWidget {
           )
         : switch (mode) {
             WifiMode.stock => (
-                Icons.wifi,
-                'Stock Wi-Fi',
-                'Built-in Wi-Fi is on.',
-              ),
+              Icons.wifi,
+              'Stock Wi-Fi',
+              'Built-in Wi-Fi is on.',
+            ),
             WifiMode.inject => (
-                Icons.security,
-                'Inject Wi-Fi',
-                'Injection stack loaded.',
-              ),
+              Icons.security,
+              'Inject Wi-Fi',
+              'Injection stack loaded.',
+            ),
             WifiMode.off => (
-                Icons.wifi_off,
-                'Wi-Fi is off',
-                'No stack loaded.',
-              ),
+              Icons.wifi_off,
+              'Wi-Fi is off',
+              'No stack loaded.',
+            ),
           };
     final title = switching
-        ? (mode == WifiMode.stock ? 'Switching to Stock…' : 'Switching to Inject…')
+        ? (mode == WifiMode.stock
+              ? 'Switching to Stock…'
+              : 'Switching to Inject…')
         : baseTitle;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -346,36 +345,12 @@ class _WifiHeroCard extends StatelessWidget {
               icon: icon,
               bg: inj ? scheme.primary : scheme.surfaceContainerHighest,
               fg: inj ? scheme.onPrimary : scheme.onSurfaceVariant,
-              // Slide the icon the same way the segmented tablet travels:
-              // Inject sits on the right (+1), Stock/Reboot on the left (-1).
-              slideSign: needsReboot
-                  ? -1
-                  : switch (mode) {
-                      WifiMode.inject => 1,
-                      WifiMode.stock => -1,
-                      WifiMode.off => 0,
-                    },
+              slideSign: mode == WifiMode.inject ? 1 : -1,
             ),
             const SizedBox(width: 16),
             Expanded(
               child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 320),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0.06, 0),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
-                  ),
-                ),
-                layoutBuilder: (currentChild, previousChildren) => Stack(
-                  alignment: Alignment.centerLeft,
-                  children: [...previousChildren, ?currentChild],
-                ),
+                duration: const Duration(milliseconds: 240),
                 child: Column(
                   key: ValueKey((mode, needsReboot, switching)),
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -386,19 +361,13 @@ class _WifiHeroCard extends StatelessWidget {
                           child: Text(
                             title,
                             style: textTheme.titleMedium?.copyWith(
-                              color: scheme.onSurface,
                               fontWeight: FontWeight.w700,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (busy) ...[
                           const SizedBox(width: 10),
                           MorphingPolygon(size: 17, color: scheme.primary),
-                        ] else if (inj) ...[
-                          const SizedBox(width: 10),
-                          PulsingDot(color: scheme.primary, size: 8),
                         ],
                       ],
                     ),
@@ -411,8 +380,6 @@ class _WifiHeroCard extends StatelessWidget {
                         style: textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
                       ),
                   ],
                 ),
@@ -420,7 +387,7 @@ class _WifiHeroCard extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
         _WifiSegmented(
           mode: mode,
           needsReboot: needsReboot,
@@ -432,18 +399,31 @@ class _WifiHeroCard extends StatelessWidget {
         // station (e.g. after using it in monitor mode). Only meaningful in
         // Inject mode with an adapter driver actually loaded.
         if (mode == WifiMode.inject && !needsReboot && canReconfigure) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
-            child: Jelly(child: OutlinedButton.icon(
-              onPressed: reconfiguring ? null : onReconfigure,
-              icon: reconfiguring
-                  ? MorphingPolygon(size: 18, color: scheme.primary)
-                  : const Icon(Icons.settings_backup_restore, size: 20),
-              label: Text(
-                reconfiguring ? 'Reconfiguring…' : 'Reconfigure for Android Wi-Fi',
+            child: Jelly(
+              child: FilledButton.tonalIcon(
+                onPressed: reconfiguring || busy ? null : onReconfigure,
+                style: FilledButton.styleFrom(
+                  backgroundColor: scheme.surfaceContainerHighest,
+                  foregroundColor: scheme.primary,
+                  minimumSize: const Size(0, 44),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                icon: reconfiguring
+                    ? MorphingPolygon(size: 18, color: scheme.primary)
+                    : const Icon(Icons.settings_backup_restore, size: 18),
+                label: Text(
+                  reconfiguring
+                      ? 'Reconfiguring…'
+                      : 'Reconfigure for Android Wi-Fi',
+                  style: textTheme.labelMedium,
+                ),
               ),
-            )),
+            ),
           ),
         ],
       ],
@@ -479,7 +459,7 @@ class _WifiSegmented extends StatelessWidget {
   final VoidCallback onReboot;
 
   static const double _pad = 5;
-  static const double _height = 52;
+  static const double _height = 56;
 
   @override
   Widget build(BuildContext context) {
@@ -497,7 +477,7 @@ class _WifiSegmented extends StatelessWidget {
           padding: const EdgeInsets.all(_pad),
           decoration: BoxDecoration(
             color: scheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(20),
           ),
           child: Stack(
             children: [
@@ -519,7 +499,7 @@ class _WifiSegmented extends StatelessWidget {
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: scheme.primary,
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(16),
                       ),
                     ),
                   ),
@@ -534,7 +514,8 @@ class _WifiSegmented extends StatelessWidget {
                     _WifiSeg(
                       label: needsReboot ? 'Reboot' : 'Stock',
                       icon: needsReboot ? Icons.restart_alt : Icons.wifi,
-                      selected: needsReboot || (!isOff && mode == WifiMode.stock),
+                      selected:
+                          needsReboot || (!isOff && mode == WifiMode.stock),
                       onTap: () {
                         // Armed → fire the reboot flow; otherwise arm it.
                         if (needsReboot) {
@@ -547,7 +528,8 @@ class _WifiSegmented extends StatelessWidget {
                     _WifiSeg(
                       label: 'Inject',
                       icon: Icons.security,
-                      selected: !needsReboot && !isOff && mode == WifiMode.inject,
+                      selected:
+                          !needsReboot && !isOff && mode == WifiMode.inject,
                       onTap: () {
                         // While armed, this cancels back to Inject (handled in
                         // _setWifi); otherwise it's the normal switch.
@@ -602,20 +584,23 @@ class _WifiSeg extends StatelessWidget {
         // not just the band where the icon+label sit.
         child: SizedBox(
           height: double.infinity,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 18, color: color),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: color),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -692,10 +677,9 @@ class _SwitchStepsState extends State<_SwitchSteps> {
           child: ReelText(
             text: _steps[_i],
             alignment: Alignment.centerLeft,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall!
-                .copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall!.copyWith(color: scheme.onSurfaceVariant),
           ),
         ),
       ),
@@ -760,7 +744,7 @@ class _HeroIcon extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(15),
       ),
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
@@ -911,8 +895,7 @@ class _AdapterRowState extends State<_AdapterRow> {
     // The driver this device needs / uses: the one bound in the running kernel
     // if any, else the driver our known-adapter table maps it to.
     final moduleKey = adapter.recognized ? adapter.match!.driver : '';
-    final driverName =
-        device.driver.isNotEmpty ? device.driver : moduleKey;
+    final driverName = device.driver.isNotEmpty ? device.driver : moduleKey;
 
     // Presence in the app = a matching .ko is staged; in the system = a driver
     // is bound now, or that staged module is loaded.
@@ -939,11 +922,13 @@ class _AdapterRowState extends State<_AdapterRow> {
         color: scheme.primary,
       );
     } else if (canLoad) {
-      trailing = Jelly(child: FilledButton.tonal(
-        key: const ValueKey('idle'),
-        onPressed: widget.onLoad,
-        child: const Text('Load'),
-      ));
+      trailing = Jelly(
+        child: FilledButton.tonal(
+          key: const ValueKey('idle'),
+          onPressed: widget.onLoad,
+          child: const Text('Load'),
+        ),
+      );
     } else if (inSystem) {
       // Once the driver has brought an interface up, the tablet carries its
       // name — the spinner the Load button turns into resolves straight into
@@ -961,7 +946,9 @@ class _AdapterRowState extends State<_AdapterRow> {
               key: const ValueKey('iface'),
               label: iface.name,
               bg: iface.up ? scheme.tertiaryContainer : scheme.errorContainer,
-              fg: iface.up ? scheme.onTertiaryContainer : scheme.onErrorContainer,
+              fg: iface.up
+                  ? scheme.onTertiaryContainer
+                  : scheme.onErrorContainer,
             )
           : _StatusTablet(
               key: const ValueKey('active'),
@@ -1000,9 +987,7 @@ class _AdapterRowState extends State<_AdapterRow> {
         ),
       ),
       title: Text(
-        adapter.recognized
-            ? adapterTitle(adapter, iface)
-            : device.displayName,
+        adapter.recognized ? adapterTitle(adapter, iface) : device.displayName,
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
@@ -1092,15 +1077,15 @@ class _AdapterRowState extends State<_AdapterRow> {
 
 /// An icon representing what a plugged device is for.
 IconData _kindIcon(UsbKind kind) => switch (kind) {
-      UsbKind.wifi => Icons.wifi_tethering,
-      UsbKind.bluetooth => Icons.bluetooth,
-      UsbKind.can => Icons.directions_car_filled_outlined,
-      UsbKind.serial => Icons.cable,
-      UsbKind.network => Icons.lan_outlined,
-      UsbKind.storage => Icons.sd_storage_outlined,
-      UsbKind.hub => Icons.hub_outlined,
-      UsbKind.other => Icons.usb,
-    };
+  UsbKind.wifi => Icons.wifi_tethering,
+  UsbKind.bluetooth => Icons.bluetooth,
+  UsbKind.can => Icons.directions_car_filled_outlined,
+  UsbKind.serial => Icons.cable,
+  UsbKind.network => Icons.lan_outlined,
+  UsbKind.storage => Icons.sd_storage_outlined,
+  UsbKind.hub => Icons.hub_outlined,
+  UsbKind.other => Icons.usb,
+};
 
 /// A compact status tablet (Loaded / Active / No driver) for a device row.
 class _StatusTablet extends StatelessWidget {

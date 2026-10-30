@@ -1,19 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'perf_controller.dart';
+import 'device_control_cards.dart';
+import 'control_surfaces.dart';
 import 'perf_info.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// The Performance tab: pick a CPU/GPU frequency-cap profile (Cool / Balanced /
-/// Full). Caps only ever snap to real OPP steps and never exceed stock, so it's
-/// safe by construction. Persisting is applied by the module at boot, so if a
-/// setting ever misbehaves, removing the module reverts everything to stock.
+/// CPU/GPU caps and performance governors, with optional boot persistence.
 class PerformanceScreen extends StatelessWidget {
-  const PerformanceScreen({super.key, required this.controller});
+  const PerformanceScreen({
+    super.key,
+    required this.controller,
+    this.preview = false,
+  });
 
   final PerfController controller;
+  final bool preview;
 
   Future<void> _select(BuildContext context, PerfProfile p) async {
     if (p == controller.profile) return;
@@ -47,46 +53,25 @@ class PerformanceScreen extends StatelessWidget {
           children: [
             if (state.bootApplySupported)
               _ProfileHero(
-                profile: controller.profile,
+                profile: controller.pendingProfile ?? controller.profile,
                 busy: controller.busy,
-                hardCaps: state.kernelCapsSupported,
+                applyingProfile: controller.pendingProfile != null,
+                state: state,
                 onSelect: (p) => _select(context, p),
               )
             else
               const _UpdateModuleNote(),
-            const SizedBox(height: 26),
-            SectionHeader(
-              icon: Icons.memory,
-              label: 'CPU',
-              trailing: '${state.clusters.length}',
+            const SizedBox(height: 16),
+            DeviceControlCards(
+              preview: preview,
+              persistOnBoot: controller.persistOnBoot,
             ),
-            const SizedBox(height: 12),
-            Card.outlined(
-              child: Column(
-                children: [
-                  for (var i = 0; i < state.clusters.length; i++) ...[
-                    if (i > 0) const CardDivider(),
-                    _ClusterRow(
-                      cluster: state.clusters[i],
-                      label: clusterLabel(state.clusters[i], state.clusters),
-                      profile: controller.profile,
-                      domain: cpuDomain(state.clusters[i], state.clusters),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (state.gpu != null) ...[
-              const SizedBox(height: 26),
-              const SectionHeader(
-                  icon: Icons.videogame_asset_outlined, label: 'GPU'),
-              const SizedBox(height: 12),
-              Card.outlined(
-                  child: _GpuRow(gpu: state.gpu!, profile: controller.profile)),
-            ],
             if (state.bootApplySupported) ...[
               const SizedBox(height: 26),
-              const SectionHeader(icon: Icons.save_outlined, label: 'Persistence'),
+              const SectionHeader(
+                icon: Icons.save_outlined,
+                label: 'Persistence',
+              ),
               const SizedBox(height: 12),
               _PersistCard(
                 enabled: controller.persistOnBoot,
@@ -101,155 +86,104 @@ class PerformanceScreen extends StatelessWidget {
 }
 
 IconData _profileIcon(PerfProfile p) => switch (p) {
-      PerfProfile.ultraEco => Icons.severe_cold,
-      PerfProfile.eco => Icons.ac_unit,
-      PerfProfile.balanced => Icons.balance,
-      PerfProfile.full => Icons.bolt,
-    };
+  PerfProfile.ultraEco => Icons.severe_cold,
+  PerfProfile.eco => Icons.ac_unit,
+  PerfProfile.balanced => Icons.balance,
+  PerfProfile.full => Icons.bolt,
+  PerfProfile.gaming => Icons.sports_esports_outlined,
+};
 
-/// The hero card: the active profile's icon + blurb, and the three-way profile
-/// selector underneath.
+/// Frequency readings and profile controls share a single card.
 class _ProfileHero extends StatelessWidget {
   const _ProfileHero({
     required this.profile,
     required this.busy,
-    required this.hardCaps,
+    required this.applyingProfile,
+    required this.state,
     required this.onSelect,
   });
 
   final PerfProfile profile;
   final bool busy;
-
-  /// The running kernel pins the ceilings itself (CONFIG_PICTERS_PERF).
-  final bool hardCaps;
+  final bool applyingProfile;
+  final PerfState state;
   final Future<void> Function(PerfProfile) onSelect;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final capped = profile != PerfProfile.full;
-    return RepaintBoundary(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 340),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: capped
-              ? Color.alphaBlend(
-                  scheme.primary.withValues(alpha: 0.09),
-                  scheme.surfaceContainerHigh,
-                )
-              : scheme.surfaceContainerHigh,
-          border: Border.all(
-            color: capped
-                ? scheme.primary.withValues(alpha: 0.45)
-                : Colors.transparent,
-            width: 1.5,
-          ),
-          borderRadius: BorderRadius.circular(Corners.hero),
-        ),
+    final capped = profile != PerfProfile.full && profile != PerfProfile.gaming;
+    bool enabled(PerfProfile p) =>
+        !busy && (p != PerfProfile.gaming || state.gamingSupported);
+
+    return Card.outlined(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 54,
-                  height: 54,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: capped
-                        ? scheme.primary
-                        : scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 320),
-                    child: Icon(
-                      _profileIcon(profile),
-                      key: ValueKey(profile),
-                      color:
-                          capped ? scheme.onPrimary : scheme.onSurfaceVariant,
-                      size: 27,
-                    ),
+            const SectionHeader(icon: Icons.memory, label: 'CPU/GPU'),
+            const SizedBox(height: 12),
+            for (final cluster in state.clusters) ...[
+              _FrequencyPlate(
+                label: clusterLabel(cluster, state.clusters),
+                icon: Icons.developer_board_outlined,
+                value: formatCpuFreq(
+                  cappedMax(
+                    profile,
+                    cpuDomain(cluster, state.clusters),
+                    cluster.maxHardware,
+                    cluster.availableFreqs,
                   ),
                 ),
-                const SizedBox(width: 16),
-                // Name and blurb ride in together the way the Wi-Fi hero's do
-                // on Overview — the old text swapped instantly under a tablet
-                // that was still sliding.
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 320),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    transitionBuilder: (child, animation) => FadeTransition(
-                      opacity: animation,
-                      child: SlideTransition(
-                        position: Tween<Offset>(
-                          begin: const Offset(0.06, 0),
-                          end: Offset.zero,
-                        ).animate(animation),
-                        child: child,
-                      ),
-                    ),
-                    layoutBuilder: (currentChild, previousChildren) => Stack(
-                      alignment: Alignment.centerLeft,
-                      children: [...previousChildren, ?currentChild],
-                    ),
-                    child: Column(
-                      key: ValueKey(profile),
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                '${profile.label} profile',
-                                style: textTheme.titleMedium?.copyWith(
-                                  color: scheme.onSurface,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (busy) ...[
-                              const SizedBox(width: 10),
-                              MorphingPolygon(size: 17, color: scheme.primary),
-                            ],
-                          ],
+                highlighted: capped,
+                gaming: profile == PerfProfile.gaming,
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (state.gpu case final gpu?)
+              _FrequencyPlate(
+                label: 'Adreno GPU',
+                icon: Icons.auto_awesome_motion_outlined,
+                value: capped
+                    ? formatGpuFreq(
+                        cappedMax(
+                          profile,
+                          PerfDomain.gpu,
+                          gpu.stockMax,
+                          gpu.availableFreqs,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          profile.blurb,
-                          style: textTheme.bodySmall
-                              ?.copyWith(color: scheme.onSurfaceVariant),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+                      )
+                    : 'Max',
+                highlighted: capped,
+                gaming: profile == PerfProfile.gaming,
+              ),
+            const SizedBox(height: 12),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 240),
+              child: Text(
+                '${profile.label} profile',
+                key: ValueKey(profile),
+                textAlign: TextAlign.center,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
             ),
-            const SizedBox(height: 20),
-            JellySegmented<PerfProfile>(
-              values: PerfProfile.values,
-              selected: profile,
-              labelOf: (p) => p.shortLabel,
+            const SizedBox(height: 4),
+            _ProfileDescription(profile: profile, busy: applyingProfile),
+            const SizedBox(height: 10),
+            _ProfileRail(
+              profile: profile,
+              enabled: enabled,
               onSelect: onSelect,
             ),
-            if (!hardCaps) ...[
+            if (!state.kernelCapsSupported) ...[
               const SizedBox(height: 12),
               Text(
-                'This kernel has no in-kernel ceilings, so the vendor perf '
-                'service keeps raising the clocks back and the module has to '
-                'chase it. Flash the newest kernel for caps that hold.',
-                style: textTheme.bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                'Update the kernel for frequency caps that hold.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
               ),
             ],
           ],
@@ -259,133 +193,252 @@ class _ProfileHero extends StatelessWidget {
   }
 }
 
-/// One CPU cluster row: its label, core count + stock ceiling, and the current
-/// max-frequency cap (accented when it's below stock).
-class _ClusterRow extends StatelessWidget {
-  const _ClusterRow({
-    required this.cluster,
+class _ProfileDescription extends StatefulWidget {
+  const _ProfileDescription({required this.profile, required this.busy});
+
+  final PerfProfile profile;
+  final bool busy;
+
+  @override
+  State<_ProfileDescription> createState() => _ProfileDescriptionState();
+}
+
+class _ProfileDescriptionState extends State<_ProfileDescription>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _motion = AnimationController(
+    vsync: this,
+    value: 1,
+    duration: const Duration(milliseconds: 240),
+  );
+  late final CurvedAnimation _textSize = CurvedAnimation(
+    parent: _motion,
+    curve: Curves.easeInOutCubic,
+  );
+  late PerfProfile _displayed = widget.profile;
+  Completer<void>? _applied;
+  bool _animating = false;
+
+  @override
+  void didUpdateWidget(covariant _ProfileDescription oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.busy && _applied != null && !_applied!.isCompleted) {
+      _applied!.complete();
+    }
+    if (!_animating &&
+        ((!oldWidget.busy && widget.busy) || widget.profile != _displayed)) {
+      _transition();
+    }
+  }
+
+  Future<void> _transition() async {
+    _animating = true;
+    _applied = Completer<void>();
+    if (!widget.busy) _applied!.complete();
+    try {
+      await _motion.reverse().orCancel;
+      // Keep the loading stage visible even when the operation finishes quickly.
+      await Future.wait([
+        _applied!.future,
+        Future<void>.delayed(const Duration(milliseconds: 160)),
+      ]);
+      if (!mounted) return;
+      setState(() => _displayed = widget.profile);
+      await _motion.forward().orCancel;
+    } on TickerCanceled {
+      // The tab was disposed while transitioning.
+    } finally {
+      if (mounted) setState(() => _animating = false);
+      if (mounted && (widget.busy || widget.profile != _displayed)) {
+        _transition();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_applied != null && !_applied!.isCompleted) _applied!.complete();
+    _textSize.dispose();
+    _motion.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 24,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          FadeTransition(
+            opacity: ReverseAnimation(_textSize),
+            child: ScaleTransition(
+              scale: ReverseAnimation(_textSize),
+              child: TickerMode(
+                enabled: _animating,
+                child: MorphingPolygon(size: 17, color: scheme.primary),
+              ),
+            ),
+          ),
+          SizeTransition(
+            axis: Axis.horizontal,
+            sizeFactor: _textSize,
+            child: FadeTransition(
+              opacity: _textSize,
+              child: Text(
+                _displayed.blurb,
+                textAlign: TextAlign.center,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FrequencyPlate extends StatelessWidget {
+  const _FrequencyPlate({
     required this.label,
-    required this.profile,
-    required this.domain,
+    required this.icon,
+    required this.value,
+    required this.highlighted,
+    required this.gaming,
   });
 
-  final CpuCluster cluster;
   final String label;
-  final PerfProfile profile;
-  final PerfDomain domain;
+  final IconData icon;
+  final String value;
+  final bool highlighted;
+  final bool gaming;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    // Show the cap this profile sets — not the live scaling_max_freq, which the
-    // vendor perf daemon (perfd) constantly rewrites, so it would flicker and
-    // read wrong at Full.
-    final cap =
-        cappedMax(profile, domain, cluster.maxHardware, cluster.availableFreqs);
-    final capped = profile != PerfProfile.full;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        backgroundColor: scheme.surfaceContainerHighest,
-        child: Icon(Icons.developer_board,
-            color: scheme.onSurfaceVariant, size: 20),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(18),
       ),
-      title: Text(label),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '${cluster.coreCount} cores · up to ${formatCpuFreq(cluster.maxHardware)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 7),
-          _CapMeter(fraction: cap / cluster.maxHardware, capped: capped),
-        ],
-      ),
-      trailing: ReelPill(text: formatCpuFreq(cap), highlight: capped),
-    );
-  }
-}
-
-/// How much of the stock ceiling this profile leaves — a bare number ("2.42
-/// GHz") says nothing on its own, the bar shows at a glance that it's about
-/// half. Fills with the same accent the frequency pill uses so the two read as
-/// one reading.
-class _CapMeter extends StatelessWidget {
-  const _CapMeter({required this.fraction, required this.capped});
-
-  final double fraction;
-  final bool capped;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    // Tween the fraction itself — a FractionallySizedBox would snap to the new
-    // width, and the bar is the one thing here that should visibly travel when
-    // the profile changes.
-    return TweenAnimationBuilder<double>(
-      tween: Tween(end: fraction.clamp(0.0, 1.0)),
-      duration: const Duration(milliseconds: 420),
-      curve: Curves.easeOutCubic,
-      builder: (context, t, _) => ClipRRect(
-        borderRadius: BorderRadius.circular(2),
-        child: SizedBox(
-          height: 3,
-          child: Stack(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final row = Row(
             children: [
-              Positioned.fill(
-                child: ColoredBox(color: scheme.surfaceContainerHighest),
-              ),
-              FractionallySizedBox(
-                widthFactor: t,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  color: capped ? scheme.primary : scheme.tertiary,
+              Icon(icon, size: 20, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge,
                 ),
               ),
+              const SizedBox(width: 8),
+              ReelPill(
+                text: value,
+                highlight: highlighted,
+                accent: gaming ? const Color(0xFFFF8A80) : null,
+              ),
             ],
-          ),
-        ),
+          );
+          return constraints.maxWidth < 160
+              ? FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: SizedBox(width: 160, child: row),
+                )
+              : row;
+        },
       ),
     );
   }
 }
 
-class _GpuRow extends StatelessWidget {
-  const _GpuRow({required this.gpu, required this.profile});
+class _ProfileRail extends StatelessWidget {
+  const _ProfileRail({
+    required this.profile,
+    required this.enabled,
+    required this.onSelect,
+  });
 
-  final GpuInfo gpu;
   final PerfProfile profile;
+  final bool Function(PerfProfile) enabled;
+  final Future<void> Function(PerfProfile) onSelect;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final cap = cappedMax(profile, PerfDomain.gpu, gpu.stockMax, gpu.availableFreqs);
-    final capped = profile != PerfProfile.full;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        backgroundColor: scheme.surfaceContainerHighest,
-        child: Icon(Icons.auto_awesome_motion_outlined,
-            color: scheme.onSurfaceVariant, size: 20),
+    const profiles = PerfProfile.values;
+    return Container(
+      key: const ValueKey('performance-profile-picker'),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(Corners.chip),
       ),
-      title: const Text('Adreno GPU'),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'up to ${formatGpuFreq(gpu.stockMax)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 7),
-          _CapMeter(fraction: cap / gpu.stockMax, capped: capped),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth / profiles.length;
+          return SizedBox(
+            height: 68,
+            child: Stack(
+              children: [
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOutCubic,
+                  left: profiles.indexOf(profile) * width,
+                  top: 0,
+                  bottom: 0,
+                  width: width,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(Corners.chip - 4),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    for (final p in profiles)
+                      Expanded(
+                        child: Semantics(
+                          label: p.label,
+                          button: true,
+                          enabled: enabled(p),
+                          selected: p == profile,
+                          child: Tooltip(
+                            message: p == PerfProfile.gaming && !enabled(p)
+                                ? 'Performance governors unavailable or busy'
+                                : p.label,
+                            child: JellyTap(
+                              onTap: enabled(p) ? () => onSelect(p) : null,
+                              child: SizedBox(
+                                height: 68,
+                                child: Center(
+                                  child: Icon(
+                                    _profileIcon(p),
+                                    size: 30,
+                                    color: p == profile
+                                        ? scheme.onPrimaryContainer
+                                        : scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
       ),
-      trailing: ReelPill(text: profile == PerfProfile.full ? 'Max' : formatGpuFreq(cap), highlight: capped),
     );
   }
 }
@@ -398,12 +451,10 @@ class _PersistCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Card.outlined(
       child: JellySwitchTile(
-        secondary: Icon(Icons.save_outlined, color: scheme.onSurfaceVariant),
+        secondary: ControlIcon(Icons.save_outlined, active: enabled),
         title: 'Keep after reboot',
-        subtitle: 'The module re-applies the profile at boot.',
         value: enabled,
         onChanged: onChanged,
       ),
@@ -435,8 +486,11 @@ class _UpdateModuleNote extends StatelessWidget {
                 color: scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(15),
               ),
-              child: Icon(Icons.system_update_alt,
-                  color: scheme.primary, size: 24),
+              child: Icon(
+                Icons.system_update_alt,
+                color: scheme.primary,
+                size: 24,
+              ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -454,8 +508,9 @@ class _UpdateModuleNote extends StatelessWidget {
                   Text(
                     'Performance profiles need the latest kernel & module to '
                     'hold. Flash the newest build to enable them.',
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -484,20 +539,25 @@ class _Unsupported extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
             child: Column(
               children: [
-                Icon(Icons.speed_outlined, size: 48, color: scheme.onSurfaceVariant),
+                Icon(
+                  Icons.speed_outlined,
+                  size: 48,
+                  color: scheme.onSurfaceVariant,
+                ),
                 const SizedBox(height: 16),
-                Text('No CPU controls found',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'No CPU controls found',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 8),
                 Text(
                   "This device doesn't expose cpufreq policies, or root hasn't "
                   'been granted yet.',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: scheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),

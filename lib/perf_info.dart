@@ -10,7 +10,7 @@ library;
 
 /// A frequency-cap preset. `full` restores the stock maximum; the others cap
 /// down for less heat and better battery.
-enum PerfProfile { ultraEco, eco, balanced, full }
+enum PerfProfile { ultraEco, eco, balanced, full, gaming }
 
 extension PerfProfileX on PerfProfile {
   String get label => switch (this) {
@@ -18,6 +18,7 @@ extension PerfProfileX on PerfProfile {
     PerfProfile.eco => 'Eco',
     PerfProfile.balanced => 'Balanced',
     PerfProfile.full => 'Full',
+    PerfProfile.gaming => 'Gaming',
   };
 
   /// Fits four segments across a phone-width selector.
@@ -26,15 +27,15 @@ extension PerfProfileX on PerfProfile {
     PerfProfile.eco => 'Eco',
     PerfProfile.balanced => 'Balanced',
     PerfProfile.full => 'Full',
+    PerfProfile.gaming => 'Gaming',
   };
 
   String get blurb => switch (this) {
-    PerfProfile.ultraEco =>
-      'For heat, not speed — about a third of stock clocks.',
-    PerfProfile.eco =>
-      'Coolest and longest battery — hard caps, prime cores hit hardest.',
-    PerfProfile.balanced => 'Cooler but still snappy — trims the top clocks.',
-    PerfProfile.full => 'Stock clocks — full performance.',
+    PerfProfile.ultraEco => 'Minimum power consumption.',
+    PerfProfile.eco => 'Reduced CPU and GPU limits.',
+    PerfProfile.balanced => 'Balanced power and performance.',
+    PerfProfile.full => 'Standard CPU and GPU limits.',
+    PerfProfile.gaming => 'CPU and GPU performance mode.',
   };
 
   static PerfProfile? fromName(String? name) {
@@ -53,7 +54,7 @@ enum PerfDomain { primeCpu, perfCpu, gpu }
 /// OPP step. Full is stock; prime is capped the hardest.
 double profileFraction(PerfProfile profile, PerfDomain domain) =>
     switch (profile) {
-      PerfProfile.full => 1.0,
+      PerfProfile.full || PerfProfile.gaming => 1.0,
       // Deliberately below Eco on every domain: the point is sustained heat, so
       // the prime cluster is pulled under the perf cluster's ceiling and the
       // scheduler stops reaching for it under load.
@@ -100,7 +101,11 @@ int cappedMax(
   int stockMax,
   List<int> available,
 ) {
-  if (profile == PerfProfile.full || available.isEmpty) return stockMax;
+  if (profile == PerfProfile.full ||
+      profile == PerfProfile.gaming ||
+      available.isEmpty) {
+    return stockMax;
+  }
   final target = (stockMax * profileFraction(profile, domain)).round();
   final snapped = snapDownToAvailable(available, target);
   return snapped > stockMax ? stockMax : snapped;
@@ -115,6 +120,10 @@ class CpuCluster {
     required this.scalingMax,
     required this.availableFreqs,
     required this.governor,
+    this.scalingMin = 0,
+    this.availableGovernors = const [],
+    this.governorWritable = false,
+    this.minWritable = false,
   });
 
   /// Policy dir name, e.g. "policy0".
@@ -135,6 +144,12 @@ class CpuCluster {
 
   /// Current scaling_governor.
   final String governor;
+  final int scalingMin;
+  final List<String> availableGovernors;
+  final bool governorWritable;
+  final bool minWritable;
+  bool get supportsPerformanceGovernor =>
+      governorWritable && availableGovernors.contains('performance');
 
   int get coreCount => cpus.length;
 }
@@ -145,6 +160,13 @@ class GpuInfo {
     required this.availableFreqs,
     required this.currentMax,
     required this.stockMax,
+    this.governor = '',
+    this.governorNode = '',
+    this.availableGovernors = const [],
+    this.governorWritable = false,
+    this.currentMin = 0,
+    this.minNode = '',
+    this.minWritable = false,
   });
 
   /// gpu_available_frequencies (Hz), ascending.
@@ -156,6 +178,17 @@ class GpuInfo {
   /// Highest frequency in the driver's supported OPP table (Hz). The saved
   /// maximum or live cap is only a fallback when the table is unavailable.
   final int stockMax;
+  final String governor;
+  final String governorNode;
+  final List<String> availableGovernors;
+  final bool governorWritable;
+  final int currentMin;
+  final String minNode;
+  final bool minWritable;
+  bool get supportsPerformanceGovernor =>
+      governorWritable &&
+      governorNode.isNotEmpty &&
+      availableGovernors.contains('performance');
 }
 
 /// A full snapshot of the CPU/GPU cap state, plus the persisted profile and the
@@ -168,6 +201,11 @@ class PerfState {
     required this.persistOnBoot,
     required this.bootApplySupported,
     this.kernelCapsSupported = false,
+    this.kernelLocksSupported = false,
+    this.frequenciesLocked = false,
+    this.gamingActive = false,
+    this.lockActive = false,
+    this.advancedBootSupported = false,
   });
 
   final List<CpuCluster> clusters;
@@ -189,6 +227,33 @@ class PerfState {
   /// (CONFIG_PICTERS_PERF). When it does, a cap can't be raised back by the
   /// vendor perf HAL, so the deepest profiles actually hold.
   final bool kernelCapsSupported;
+
+  /// An independent FREQ_QOS_MIN request, separate from vendor minimums.
+  final bool kernelLocksSupported;
+
+  /// Configured request and separately verified live state.
+  final bool frequenciesLocked;
+  final bool gamingActive;
+  final bool lockActive;
+  final bool advancedBootSupported;
+
+  bool get gamingSupported =>
+      clusters.any((c) => c.supportsPerformanceGovernor) ||
+      (gpu?.supportsPerformanceGovernor ?? false);
+
+  List<String> get unsupportedGamingDomains => [
+    for (final c in clusters)
+      if (!c.supportsPerformanceGovernor) c.policy,
+    if (gpu != null && !gpu!.supportsPerformanceGovernor) 'GPU',
+  ];
+
+  bool get frequencyLockSupported =>
+      clusters.isNotEmpty &&
+      clusters.every(
+        (c) => c.minWritable && c.scalingMin > 0 && c.maxHardware > 0,
+      ) &&
+      (gpu == null ||
+          (gpu!.minWritable && gpu!.currentMin > 0 && gpu!.minNode.isNotEmpty));
 
   bool get isEmpty => clusters.isEmpty;
 

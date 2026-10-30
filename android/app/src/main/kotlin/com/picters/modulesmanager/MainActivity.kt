@@ -134,8 +134,40 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
+                "decodeThermalPolicy", "encodeThermalPolicy" -> {
+                    val raw = call.argument<ByteArray>("bytes")
+                    val text = call.argument<String>("text")
+                    val codec = call.argument<String>("codec")
+                    Thread {
+                        try {
+                            val value: Any = if (call.method == "decodeThermalPolicy") {
+                                val decoded = ThermalPolicyCipher.decode(
+                                    requireNotNull(raw) { "Missing policy bytes" },
+                                )
+                                mapOf("text" to decoded.text, "codec" to decoded.codec)
+                            } else {
+                                ThermalPolicyCipher.encode(
+                                    requireNotNull(text) { "Missing policy text" },
+                                    requireNotNull(codec) { "Missing policy codec" },
+                                )
+                            }
+                            mainHandler.post { result.success(value) }
+                        } catch (error: Exception) {
+                            mainHandler.post {
+                                result.error("THERMAL_CODEC", error.message, null)
+                            }
+                        }
+                    }.start()
+                }
                 "requestPinShortcut" -> result.success(requestPinShortcut())
                 "openRootManager" -> result.success(openRootManager())
+                "openUrl" -> result.success(runCatching {
+                    val url = call.argument<String>("url") ?: return@runCatching false
+                    val uri = Uri.parse(url)
+                    if (uri.scheme != "https" || uri.host.isNullOrBlank()) return@runCatching false
+                    startActivity(Intent(Intent.ACTION_VIEW, uri))
+                    true
+                }.getOrDefault(false))
                 "openKernelReleases" -> result.success(runCatching {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(
                         "https://github.com/Picters/android_kernel_xiaomi_sm8850-extra/releases/latest"

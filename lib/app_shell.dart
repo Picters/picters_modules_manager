@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'app_bottom_bar.dart';
 import 'app_controller.dart';
+import 'app_bottom_bar.dart';
 import 'brand_mark.dart';
 import 'module_repository.dart';
 import 'modules_screen.dart';
@@ -12,12 +12,13 @@ import 'native_bridge.dart';
 import 'overview_screen.dart';
 import 'performance_screen.dart';
 import 'settings_screen.dart';
-import 'theme.dart';
 import 'widgets.dart';
+import 'theme.dart';
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
-
+  const AppShell({super.key, this.controller, this.preview = false});
+  final AppController? controller;
+  final bool preview;
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -38,44 +39,52 @@ class _SnappyPagePhysics extends PageScrollPhysics {
 }
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
-  final AppController _controller = AppController(ModuleRepository());
-  PageController _pageController = PageController();
-
-  // Pushed USB attach/detach events — refresh the scan the moment an adapter is
-  // plugged instead of waiting out the poll interval.
+  late final AppController _controller;
+  final PageController _pageController = PageController();
+  final ValueNotifier<int> _tab = ValueNotifier(0);
   StreamSubscription<void>? _usbSub;
-
-  // Only the fields the shell chrome needs, so the 1s poll doesn't rebuild
-  // the whole Scaffold — the two screens have their own AnimatedBuilders.
   RootStatus _rootStatus = RootStatus.checking;
+  bool _settingsReady = false;
   bool _hasUpdate = false;
   bool _onPictersKernel = true;
   bool _deviceSupported = true;
 
-  // The active tab as a notifier, NOT setState: only the AppBar title and the
-  // nav bar listen to it, so switching tabs never rebuilds the PageView or the
-  // two heavy screens. (Doing that mid-swipe was the freeze-then-jump.)
-  final ValueNotifier<int> _tab = ValueNotifier(0);
-
-  // The Performance tab can be hidden from Settings; the titles, pages and nav
-  // items are built from this.
-  bool _hidePerf = false;
-
-  // False until the persisted hide-flag has been read once — the tab chrome is
-  // held back until then so it never flashes 4 tabs and collapses to 3.
-  bool _settingsReady = false;
-
   @override
   void initState() {
     super.initState();
+    _controller = widget.controller ?? AppController(ModuleRepository());
     WidgetsBinding.instance.addObserver(this);
     _controller.addListener(_handleControllerChanged);
-    // Release notices have their own notifier.
     _controller.releases.addListener(_handleControllerChanged);
-    _controller.settings.addListener(_handleSettingsChanged);
+    _controller.settings.addListener(_handleControllerChanged);
     _controller.init();
-    _usbSub = NativeBridge.usbEvents().listen((_) {
-      if (_controller.rootStatus == RootStatus.granted) _controller.refresh();
+    if (!widget.preview) {
+      _usbSub = NativeBridge.usbEvents().listen((_) {
+        if (_controller.rootStatus == RootStatus.granted) _controller.refresh();
+      });
+    }
+  }
+
+  void _handleControllerChanged() {
+    if (!mounted) return;
+    final ready = _controller.settings.loaded;
+    final status = _controller.rootStatus;
+    final update = _controller.releases.newReleaseAvailable;
+    final authentic = _controller.onPictersKernel;
+    final supported = _controller.releases.deviceSupported;
+    if (ready == _settingsReady &&
+        status == _rootStatus &&
+        update == _hasUpdate &&
+        authentic == _onPictersKernel &&
+        supported == _deviceSupported) {
+      return;
+    }
+    setState(() {
+      _settingsReady = ready;
+      _rootStatus = status;
+      _hasUpdate = update;
+      _onPictersKernel = authentic;
+      _deviceSupported = supported;
     });
   }
 
@@ -85,78 +94,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _usbSub?.cancel();
     _controller.removeListener(_handleControllerChanged);
     _controller.releases.removeListener(_handleControllerChanged);
-    _controller.settings.removeListener(_handleSettingsChanged);
+    _controller.settings.removeListener(_handleControllerChanged);
+    _controller.dispose();
     _pageController.dispose();
     _tab.dispose();
-    _controller.dispose();
     super.dispose();
   }
 
-  void _handleControllerChanged() {
-    final hasUpdate = _controller.releases.newReleaseAvailable;
-    final onPicters = _controller.onPictersKernel;
-    final deviceSupported = _controller.releases.deviceSupported;
-    if (_controller.rootStatus != _rootStatus ||
-        hasUpdate != _hasUpdate ||
-        onPicters != _onPictersKernel ||
-        deviceSupported != _deviceSupported) {
-      setState(() {
-        _rootStatus = _controller.rootStatus;
-        _hasUpdate = hasUpdate;
-        _onPictersKernel = onPicters;
-        _deviceSupported = deviceSupported;
-      });
-    }
-  }
-
-  // Reacts to the Settings controller: the first flag read reveals the chrome
-  // (and adopts the tab set silently, leaving the user on Overview); a later
-  // user toggle re-indexes and keeps the user on Settings.
-  void _handleSettingsChanged() {
-    final s = _controller.settings;
-    final ready = s.loaded;
-    final hide = s.hidePerformance;
-
-    // A genuine user toggle only happens after the first load, when the flag
-    // actually flips. Everything else (initial read, becoming ready) just adopts
-    // the value without moving the user.
-    final userToggle = ready && _settingsReady && hide != _hidePerf;
-    if (hide == _hidePerf && ready == _settingsReady) return;
-
-    if (!userToggle) {
-      setState(() {
-        _hidePerf = hide;
-        _settingsReady = ready;
-      });
-      return;
-    }
-
-    // The Performance toggle lives on Settings (the last tab). Hiding/showing it
-    // shifts indices, so rebuild with a fresh controller aimed at the Settings
-    // tab's new index — the user stays put.
-    final settingsIndex = hide ? 2 : 3;
-    _pageController.dispose();
-    _pageController = PageController(initialPage: settingsIndex);
-    setState(() {
-      _hidePerf = hide;
-      _tab.value = settingsIndex;
-    });
-    // When the tab set GROWS (un-hiding), initialPage can clamp against the
-    // stale, smaller scroll extent and land on the wrong page (Performance) —
-    // re-assert the target once the new layout is in.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted &&
-          _pageController.hasClients &&
-          _pageController.page?.round() != settingsIndex) {
-        _pageController.jumpToPage(settingsIndex);
-      }
-    });
-  }
-
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    _controller.setForeground(state == AppLifecycleState.resumed);
-  }
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      _controller.setForeground(state == AppLifecycleState.resumed);
 
   bool _programmaticPage = false;
   int _navGen = 0;
@@ -208,185 +155,154 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _tab.value = page;
   }
 
-  Future<void> _pinShortcut() async {
-    HapticFeedback.lightImpact();
-    final ok = await confirmAction(
-      context,
-      title: 'Pin shortcut?',
-      message: 'Add a home-screen shortcut for this app?',
-      confirmLabel: 'Pin',
-    );
-    if (!ok || !mounted) return;
-    final done = await NativeBridge.requestPinShortcut();
-    if (!mounted) return;
-    if (done) {
-      showInfo(context, 'Shortcut request sent to your launcher.');
-    } else {
-      showError(context, "Your launcher doesn't support pinned shortcuts.");
+  bool _handleScroll(ScrollNotification notification) {
+    if (notification is ScrollStartNotification) {
+      _controller.setPollPaused(true);
+      if (notification.depth == 0 && notification.dragDetails != null) {
+        _navGen++;
+        _programmaticPage = false;
+      }
+    } else if (notification is ScrollEndNotification) {
+      _controller.setPollPaused(false);
+      if (notification.depth == 0) _syncTabToPage();
     }
+    return false;
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => Scaffold(
+          appBar: AppBar(title: const Text('Settings')),
+          body: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 840),
+              child: SettingsScreen(
+                controller: _controller.settings,
+                preview: widget.preview,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Granted but flags not read yet → keep the neutral loader up rather than
-    // painting a tab set we're about to change.
     final granted = _rootStatus == RootStatus.granted && _settingsReady;
-    final hidePerf = _hidePerf;
-    final titles = [
-      'Overview',
-      'Modules',
-      if (!hidePerf) 'Performance',
-      'Settings',
-    ];
+    const titles = ['Overview', 'Modules', 'Performance'];
     return Scaffold(
-      // The floating bar hovers over the content instead of reserving a strip.
       extendBody: true,
       appBar: AppBar(
-        title: granted
-            ? ValueListenableBuilder<int>(
-                valueListenable: _tab,
-                builder: (context, tab, _) =>
-                    Text(titles[tab.clamp(0, titles.length - 1)]),
-              )
-            : const Text('Modules Manager'),
+        toolbarHeight: 64,
+        title: ValueListenableBuilder<int>(
+          valueListenable: _tab,
+          builder: (context, tab, _) =>
+              Text(granted ? titles[tab] : 'Kernel Manager'),
+        ),
         actions: [
-          if (_hasUpdate)
-            _ReleasePill(onTap: () => _openReleases(context)),
+          if (_hasUpdate) _ReleasePill(onTap: () => _openReleases(context)),
           if (granted)
             _SquareIconButton(
-              icon: Icons.add_to_home_screen_outlined,
-              tooltip: 'Pin shortcut',
-              onTap: _pinShortcut,
+              icon: Icons.settings_outlined,
+              tooltip: 'Settings',
+              onTap: _openSettings,
             ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 20),
         ],
       ),
-      body: switch (_rootStatus) {
-        RootStatus.checking => const _CenterGlyph(
-          icon: Icons.hourglass_empty,
-          title: 'Checking root access…',
-          spinner: true,
-        ),
-        RootStatus.denied => _RootDenied(controller: _controller),
-        // Root is in, but hold the neutral loader until the tab flags are read
-        // so the chrome appears once, already in its final shape.
-        RootStatus.granted when !_settingsReady => const _CenterGlyph(
-          icon: Icons.hourglass_empty,
-          title: 'Loading…',
-          spinner: true,
-        ),
-        // Pause the poll while a page scroll is in flight (swipe or tap-driven
-        // animate) — a mid-transition rebuild is what stalled the animation.
-        RootStatus.granted => Column(
-          children: [
-            // Identify hardware this kernel/module pack is built for.
-            if (!_deviceSupported) const _UnsupportedDeviceBanner(),
-            // Standing warning strip on a foreign (non-Picters) kernel.
-            if (!_onPictersKernel) const _KernelWarningBanner(),
-            Expanded(
-              child: NotificationListener<ScrollNotification>(
-                onNotification: (n) {
-                  if (n is ScrollStartNotification) {
-                    _controller.setPollPaused(true);
-                    // depth 0 is the PageView itself; anything deeper is a
-                    // screen's own vertical list, which must not be mistaken
-                    // for the user grabbing the pager.
-                    if (n.depth == 0 && n.dragDetails != null) {
-                      // A finger landing mid-flight takes the navigation over.
-                      // Bumping the generation retires the in-flight
-                      // animateToPage callback, and dropping the programmatic
-                      // flag lets page changes drive the chip again — otherwise
-                      // the tap's target stays latched while the finger moves
-                      // the content somewhere else entirely.
-                      _navGen++;
-                      _programmaticPage = false;
-                    }
-                  } else if (n is ScrollEndNotification) {
-                    _controller.setPollPaused(false);
-                    if (n.depth == 0) _syncTabToPage();
-                  }
-                  return false;
-                },
-                child: PageView(
-            controller: _pageController,
-            physics: const _SnappyPagePhysics(),
-            onPageChanged: _onPageChanged,
-            // Sets the viewport's cacheExtent to one full page, so the
-            // neighbouring tab is built and laid out while nothing is moving.
-            // Without it the first visit to a tab builds its entire tree in the
-            // frame the gesture starts — and the Modules tree is every staged
-            // .ko, grouped — which is the stutter you only ever see once per
-            // tab, because _KeepAlive holds the result afterwards.
-            allowImplicitScrolling: true,
-            // Each page in its own layer, so a swipe just translates it
-            // instead of repainting both screens every frame. Kept alive so
-            // leaving a tab and coming back preserves its state — expanded
-            // module groups, the search text and the active filter — instead
-            // of rebuilding the screen collapsed from scratch.
-            children: [
-              _KeepAlive(
-                key: const ValueKey('page-overview'),
-                child: RepaintBoundary(
-                  child: OverviewScreen(controller: _controller),
-                ),
+      body: Column(
+        children: [
+          Expanded(
+            child: switch (_rootStatus) {
+              RootStatus.checking => const _CenterGlyph(
+                icon: Icons.hourglass_empty,
+                title: 'Checking root access…',
+                spinner: true,
               ),
-              _KeepAlive(
-                key: const ValueKey('page-modules'),
-                child: RepaintBoundary(
-                  child: ModulesScreen(controller: _controller),
-                ),
+              RootStatus.denied => _RootDenied(controller: _controller),
+              RootStatus.granted when !_settingsReady => const _CenterGlyph(
+                icon: Icons.hourglass_empty,
+                title: 'Loading…',
+                spinner: true,
               ),
-              if (!hidePerf)
-                _KeepAlive(
-                  key: const ValueKey('page-performance'),
-                  child: RepaintBoundary(
-                    child: PerformanceScreen(controller: _controller.perf),
+              RootStatus.granted => Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      children: [
+                        if (!_deviceSupported) const _UnsupportedDeviceBanner(),
+                        if (!_onPictersKernel) const _KernelWarningBanner(),
+                        Expanded(
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 960),
+                              child: NotificationListener<ScrollNotification>(
+                                onNotification: _handleScroll,
+                                child: PageView(
+                                  controller: _pageController,
+                                  physics: const _SnappyPagePhysics(),
+                                  onPageChanged: _onPageChanged,
+                                  allowImplicitScrolling: true,
+                                  children: [
+                                    _KeepAlive(
+                                      key: const ValueKey('page-overview'),
+                                      child: OverviewScreen(
+                                        controller: _controller,
+                                      ),
+                                    ),
+                                    _KeepAlive(
+                                      key: const ValueKey('page-modules'),
+                                      child: ModulesScreen(
+                                        controller: _controller,
+                                      ),
+                                    ),
+                                    _KeepAlive(
+                                      key: const ValueKey('page-performance'),
+                                      child: PerformanceScreen(
+                                        controller: _controller.perf,
+                                        preview: widget.preview,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              _KeepAlive(
-                key: const ValueKey('page-settings'),
-                child: RepaintBoundary(
-                  child: SettingsScreen(controller: _controller.settings),
-                ),
+                ],
               ),
-            ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      },
+            },
+          ),
+        ],
+      ),
       bottomNavigationBar: granted
-          ? RepaintBoundary(
-              child: ValueListenableBuilder<int>(
-                valueListenable: _tab,
-                builder: (context, tab, _) => AppBottomBar(
-                  index: tab,
-                  onSelect: _goToTab,
-                  items: [
-                    const BottomBarItem(
-                      icon: Icons.home_outlined,
-                      selectedIcon: Icons.home,
-                      label: 'Overview',
-                    ),
-                    const BottomBarItem(
-                      icon: Icons.tune_outlined,
-                      selectedIcon: Icons.tune,
-                      label: 'Modules',
-                    ),
-                    if (!hidePerf)
-                      const BottomBarItem(
-                        icon: Icons.speed_outlined,
-                        selectedIcon: Icons.speed,
-                        label: 'Performance',
-                      ),
-                    const BottomBarItem(
-                      icon: Icons.settings_outlined,
-                      selectedIcon: Icons.settings,
-                      label: 'Settings',
-                    ),
-                  ],
-                ),
+          ? ValueListenableBuilder<int>(
+              valueListenable: _tab,
+              builder: (context, index, _) => AppBottomBar(
+                index: index,
+                onSelect: _goToTab,
+                items: const [
+                  BottomBarItem(
+                    icon: Icons.home_outlined,
+                    selectedIcon: Icons.home,
+                    label: 'Overview',
+                  ),
+                  BottomBarItem(
+                    icon: Icons.tune_outlined,
+                    selectedIcon: Icons.tune,
+                    label: 'Modules',
+                  ),
+                  BottomBarItem(
+                    icon: Icons.speed_outlined,
+                    selectedIcon: Icons.speed,
+                    label: 'Performance',
+                  ),
+                ],
               ),
             )
           : null,
@@ -493,7 +409,11 @@ class _RootDenied extends StatelessWidget {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.lock_outline, size: 20, color: scheme.onSurfaceVariant),
+                Icon(
+                  Icons.lock_outline,
+                  size: 20,
+                  color: scheme.onSurfaceVariant,
+                ),
                 const SizedBox(width: 9),
                 Text('Root required', style: textTheme.headlineSmall),
               ],
@@ -509,11 +429,13 @@ class _RootDenied extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 28),
-            Jelly(child: FilledButton.icon(
-              onPressed: () => NativeBridge.restartApp(),
-              icon: const Icon(Icons.restart_alt),
-              label: const Text('Restart app'),
-            )),
+            Jelly(
+              child: FilledButton.icon(
+                onPressed: () => NativeBridge.restartApp(),
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('Restart app'),
+              ),
+            ),
           ],
         ),
       ),
@@ -524,8 +446,9 @@ class _RootDenied extends StatelessWidget {
 Future<void> _openReleases(BuildContext context) async {
   final opened = await NativeBridge.openKernelReleases();
   if (!opened && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Could not open GitHub. Open Picters kernel releases in your browser.')),
+    showError(
+      context,
+      'Could not open GitHub. Open Picters kernel releases in your browser.',
     );
   }
 }
@@ -573,7 +496,9 @@ class _ReleasePillState extends State<_ReleasePill>
           builder: (context, child) {
             final pulse = Curves.easeInOut.transform(_c.value);
             final entered = Curves.easeOutBack.transform(_entry.value);
-            final opacity = Curves.easeOut.transform(_entry.value).clamp(0.0, 1.0);
+            final opacity = Curves.easeOut
+                .transform(_entry.value)
+                .clamp(0.0, 1.0);
             final scale = (0.7 + 0.3 * entered) * (1 + 0.04 * pulse);
             return Opacity(
               opacity: opacity,
@@ -639,17 +564,20 @@ class _KernelWarningBanner extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             children: [
-              Icon(Icons.warning_amber_rounded,
-                  size: 20, color: scheme.onErrorContainer),
+              Icon(
+                Icons.warning_amber_rounded,
+                size: 20,
+                color: scheme.onErrorContainer,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Not running the Picters kernel — Wi-Fi injection and the '
                   'bundled modules may not work.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onErrorContainer,
-                        fontWeight: FontWeight.w500,
-                      ),
+                    color: scheme.onErrorContainer,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ],
@@ -685,9 +613,9 @@ class _UnsupportedDeviceBanner extends StatelessWidget {
                   'Unsupported device. Kernel and modules are built only '
                   'for the Xiaomi 17 series (sm8850).',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onErrorContainer,
-                        fontWeight: FontWeight.w500,
-                      ),
+                    color: scheme.onErrorContainer,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ],

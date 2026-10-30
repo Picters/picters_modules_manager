@@ -47,6 +47,7 @@ void main() {
   );
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('picters-perf-');
+    await File('${dir.path}/gpu').writeAsString('902000000\n');
   });
   tearDown(() async {
     await dir.delete(recursive: true);

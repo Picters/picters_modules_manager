@@ -93,19 +93,18 @@ int newestManualReleaseCode(List<dynamic> releases, {String? channel}) {
       final kernelPattern = RegExp(
         '^Mi17_Kernel-[0-9]+\\.[0-9]+\\.[0-9]+-$android-[A-Za-z0-9._+-]+-$stamp\\.zip\$',
       );
-      final modulesPattern = RegExp(
-        '^Mi17_OOTMODULES-[0-9]+\\.[0-9]+\\.[0-9]+-$android-[A-Za-z0-9._+-]+-$stamp\\.zip\$',
-      );
       final kernelNames = names.whereType<String>().where(
         kernelPattern.hasMatch,
       );
       return kernelNames.any(
         (name) =>
-            names.contains(
-              name.replaceFirst('Mi17_Kernel-', 'Mi17_OOTMODULES-'),
-            ) &&
-            modulesPattern.hasMatch(
-              name.replaceFirst('Mi17_Kernel-', 'Mi17_OOTMODULES-'),
+            [
+              'Mi17_PictersKernelPack-',
+              'Mi17_SystemPack-',
+              'Mi17_OOTMODULES-',
+            ].any(
+              (prefix) =>
+                  names.contains(name.replaceFirst('Mi17_Kernel-', prefix)),
             ),
       );
     });

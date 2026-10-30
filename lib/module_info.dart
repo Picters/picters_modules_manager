@@ -1,4 +1,5 @@
 import 'usb_devices.dart';
+import 'battery_reading.dart';
 
 /// A single OOT `.ko` driver staged under /system/lib/modules.
 class ModuleInfo {
@@ -79,6 +80,7 @@ class SystemState {
     required this.macLoaded,
     required this.vendorWifiLoaded,
     required this.modulesDirExists,
+    this.battery,
   });
 
   final List<ModuleInfo> modules;
@@ -89,6 +91,7 @@ class SystemState {
   final bool macLoaded;
   final bool vendorWifiLoaded;
   final bool modulesDirExists;
+  final BatteryReading? battery;
 
   static const empty = SystemState(
     modules: [],
@@ -111,11 +114,15 @@ class SystemState {
   String get fingerprint {
     final mods = modules.map((m) => '${m.name}:${m.loaded ? 1 : 0}').join(',');
     final adap = adapters
-        .map((a) =>
-            '${a.device.idPair}:${a.device.driver}:${a.recognized ? a.match!.driver : "?"}')
+        .map(
+          (a) =>
+              '${a.device.idPair}:${a.device.driver}:${a.recognized ? a.match!.driver : "?"}',
+        )
         .join(',');
     final ifs = interfaces
-        .map((i) => '${i.name}:${i.driver}:${i.up ? 1 : 0}:${i.monitor ? 1 : 0}')
+        .map(
+          (i) => '${i.name}:${i.driver}:${i.up ? 1 : 0}:${i.monitor ? 1 : 0}',
+        )
         .join(',');
     return '$wifiMode|$mods|$adap|$ifs|$modulesDirExists';
   }

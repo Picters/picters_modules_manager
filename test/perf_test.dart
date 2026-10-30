@@ -112,11 +112,12 @@ void main() {
         PerfProfile.eco,
         PerfProfile.balanced,
         PerfProfile.full,
+        PerfProfile.gaming,
       ]);
       for (var i = 1; i < PerfProfile.values.length; i++) {
         expect(
           cappedMax(PerfProfile.values[i - 1], perf, stock, p0),
-          lessThan(cappedMax(PerfProfile.values[i], perf, stock, p0)),
+          lessThanOrEqualTo(cappedMax(PerfProfile.values[i], perf, stock, p0)),
         );
       }
     });

@@ -190,6 +190,24 @@ void main() {
   });
 
   group('update delivery', () {
+    test('release channel follows vendor KMI instead of the system SDK', () async {
+      for (final entry in <String, String?>{
+        'VENDOR:6.12.23-android16-5-gstock-mi-4k SMP': 'A16',
+        'VENDOR:6.12.69-android16-6-gstock-mi-4k SMP': 'A17',
+        'A16\nVENDOR:6.12.23-android16-5-gstock SMP': 'A16',
+        'VENDOR:6.12.23-android16-5-gstock SMP\n'
+            'VENDOR:6.12.69-android16-6-gother SMP': null,
+        'VENDOR:6.12.23-android17-5-gunknown SMP': null,
+        '37': null,
+        '': null,
+      }.entries) {
+        final fake = FakeRootRunner((_) => ShellResult(0, entry.key));
+        expect(await ModuleRepository(fake).installedReleaseChannel(), entry.value);
+        expect(fake.lastScript, isNot(contains('ro.build.version.sdk')));
+        expect(fake.lastScript, contains('/vendor_dlkm/lib/modules'));
+      }
+    });
+
     test('installedModulesVersionCode parses the stamped code, 0 otherwise',
         () async {
       expect(

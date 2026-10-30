@@ -8,8 +8,7 @@ plugins {
 }
 
 // Release signing is driven by android/key.properties (kept out of source
-// control — see key.properties.example). Without it the release build falls back
-// to the debug keys, so a plain `flutter build apk` still works for local/dev use.
+// control — see key.properties.example). A release must use the stable key.
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
@@ -34,6 +33,9 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.picters.modulesmanager"
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -55,15 +57,18 @@ android {
 
     buildTypes {
         release {
-            // Real release keys when android/key.properties is present, the debug
-            // keys otherwise so dev builds still work. Matters for self-update:
-            // `pm install -r` requires the installed build and the update APK to
-            // share a signer, so shipped releases must use a stable release key.
-            signingConfig = if (keystorePropertiesFile.exists())
-                signingConfigs.getByName("release")
-            else
-                signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
+    }
+}
+
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it.project == project && it.name.contains("Release", ignoreCase = true) }) {
+        check(keystorePropertiesFile.isFile) { "Release signing requires android/key.properties." }
+        for (name in listOf("keyAlias", "keyPassword", "storeFile", "storePassword")) {
+            check(!keystoreProperties.getProperty(name).isNullOrBlank()) { "Missing release signing property: $name" }
+        }
+        check(file(keystoreProperties.getProperty("storeFile")).isFile) { "Release keystore file is missing." }
     }
 }
 

@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+if [ -x /opt/flutter/bin/flutter ]; then
+  exec /opt/flutter/bin/flutter run -d linux --no-pub -t lib/main_preview.dart "$@"
+fi
+exec flutter run -d linux --no-pub -t lib/main_preview.dart "$@"

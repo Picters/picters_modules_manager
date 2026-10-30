@@ -114,6 +114,16 @@ ThemeData buildAppTheme(Brightness brightness) {
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: baseBg,
+    visualDensity: VisualDensity.standard,
+    navigationRailTheme: NavigationRailThemeData(
+      indicatorColor: scheme.primary.withValues(alpha: 0.15),
+      selectedIconTheme: IconThemeData(color: scheme.primary),
+      selectedLabelTextStyle: TextStyle(color: scheme.primary, fontSize: 12),
+      unselectedLabelTextStyle: TextStyle(
+        color: scheme.onSurfaceVariant,
+        fontSize: 12,
+      ),
+    ),
     // InkRipple, not InkSparkle: the sparkle splash is drawn by a fragment
     // shader that compiles on the *first* tap of a session, stalling that tap
     // (and nav-bar presses) with a visible hitch. The ripple is a plain
@@ -136,7 +146,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       backgroundColor: raisedBg,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
-      height: 72,
+      height: 74,
       // A translucent wash of the accent rather than an opaque pill: on this
       // surface a solid dark container reads as a smudge, a tint reads as light.
       indicatorColor: scheme.primary.withValues(alpha: 0.16),
@@ -201,7 +211,9 @@ ThemeData buildAppTheme(Brightness brightness) {
           TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
         ),
         backgroundColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? scheme.primary : Colors.transparent,
+          (s) => s.contains(WidgetState.selected)
+              ? scheme.primary
+              : Colors.transparent,
         ),
         foregroundColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected)
@@ -216,9 +228,19 @@ ThemeData buildAppTheme(Brightness brightness) {
         side: WidgetStatePropertyAll(BorderSide(color: scheme.outlineVariant)),
       ),
     ),
+    // Current Flutter still requires this flag to select the updated M3 slider.
+    // ignore: deprecated_member_use
+    sliderTheme: const SliderThemeData(year2023: false),
     switchTheme: SwitchThemeData(
+      thumbIcon: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? const Icon(Icons.check, size: 16)
+            : null,
+      ),
       thumbColor: WidgetStateProperty.resolveWith(
-        (s) => s.contains(WidgetState.selected) ? scheme.onPrimary : scheme.outline,
+        (s) => s.contains(WidgetState.selected)
+            ? scheme.onPrimary
+            : scheme.outline,
       ),
       trackColor: WidgetStateProperty.resolveWith(
         (s) => s.contains(WidgetState.selected)
@@ -226,7 +248,9 @@ ThemeData buildAppTheme(Brightness brightness) {
             : scheme.surfaceContainerHighest,
       ),
       trackOutlineColor: WidgetStateProperty.resolveWith(
-        (s) => s.contains(WidgetState.selected) ? Colors.transparent : scheme.outline,
+        (s) => s.contains(WidgetState.selected)
+            ? Colors.transparent
+            : scheme.outline,
       ),
     ),
     dialogTheme: const DialogThemeData(
@@ -236,12 +260,17 @@ ThemeData buildAppTheme(Brightness brightness) {
     ),
     bottomSheetTheme: const BottomSheetThemeData(
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(Corners.sheet)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(Corners.sheet),
+        ),
       ),
     ),
-    dividerTheme: DividerThemeData(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+    dividerTheme: DividerThemeData(
+      color: scheme.outlineVariant.withValues(alpha: 0.5),
+    ),
     snackBarTheme: const SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
+      dismissDirection: DismissDirection.horizontal,
       insetPadding: EdgeInsets.fromLTRB(16, 5, 16, 12),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.all(Radius.circular(20)),
@@ -258,15 +287,24 @@ void showInfo(BuildContext context, String message) {
   _showBanner(context, message, isError: false);
 }
 
-void _showBanner(BuildContext context, String message, {required bool isError}) {
+void _showBanner(
+  BuildContext context,
+  String message, {
+  required bool isError,
+}) {
   final scheme = Theme.of(context).colorScheme;
-  final background = isError ? scheme.errorContainer : scheme.secondaryContainer;
-  final foreground = isError ? scheme.onErrorContainer : scheme.onSecondaryContainer;
+  final background = isError
+      ? scheme.errorContainer
+      : scheme.secondaryContainer;
+  final foreground = isError
+      ? scheme.onErrorContainer
+      : scheme.onSecondaryContainer;
   ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
+    ..clearSnackBars()
     ..showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
+        dismissDirection: DismissDirection.horizontal,
         backgroundColor: background,
         content: Row(
           children: [
@@ -285,6 +323,10 @@ void _showBanner(BuildContext context, String message, {required bool isError}) 
             ),
           ],
         ),
+      ),
+      snackBarAnimationStyle: const AnimationStyle(
+        duration: Duration(milliseconds: 360),
+        reverseDuration: Duration(milliseconds: 240),
       ),
     );
 }

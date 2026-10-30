@@ -14,6 +14,7 @@ class PerfController extends ChangeNotifier {
 
   PerfState state = PerfState.empty;
   bool busy = false;
+  PerfProfile? pendingProfile;
   String? lastError;
 
   /// The active profile — from the persisted config, defaulting to Full (stock)
@@ -35,6 +36,7 @@ class PerfController extends ChangeNotifier {
 
   Future<void> setProfile(PerfProfile p) async {
     if (busy) return;
+    pendingProfile = p;
     busy = true;
     lastError = null;
     notifyListeners();
@@ -51,6 +53,30 @@ class PerfController extends ChangeNotifier {
     } catch (e) {
       lastError = 'Error: $e';
     } finally {
+      pendingProfile = null;
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> setFrequencyLock(bool locked) async {
+    if (busy || state.frequenciesLocked == locked) return;
+    busy = true;
+    lastError = null;
+    notifyListeners();
+    try {
+      final r = await _repo.setFrequencyLock(
+        locked: locked,
+        state: state,
+        persistOnBoot: state.persistOnBoot,
+      );
+      if (!r.ok || !r.stdout.contains('OK_PERF')) {
+        lastError = 'Could not change frequency locking: ${r.errorSummary}';
+      }
+      await refresh();
+    } catch (e) {
+      lastError = 'Error: $e';
+    } finally {
       busy = false;
       notifyListeners();
     }
@@ -59,6 +85,7 @@ class PerfController extends ChangeNotifier {
   Future<void> setPersistOnBoot(bool value) async {
     if (busy || state.persistOnBoot == value) return;
     busy = true;
+    lastError = null;
     notifyListeners();
     try {
       final r = await _repo.applyProfile(
