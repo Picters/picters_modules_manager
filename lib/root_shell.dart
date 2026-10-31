@@ -38,6 +38,24 @@ class ShellResult {
   }
 }
 
+/// Frames a shell response without discarding stdout before its end marker.
+class RootReplyFrame {
+  RootReplyFrame(this.marker);
+  final String marker;
+  final StringBuffer _output = StringBuffer();
+
+  ShellResult? addLine(String line) {
+    final index = line.indexOf('$marker:');
+    if (index < 0) {
+      _output.writeln(line);
+      return null;
+    }
+    _output.write(line.substring(0, index));
+    final code = int.tryParse(line.substring(index + marker.length + 1).trim());
+    return ShellResult(code ?? -1, _output.toString().trimRight());
+  }
+}
+
 /// A single long-lived `su` process, fed one script at a time (framed by an
 /// end-marker) instead of spawning `su` per command. Calls are serialized
 /// through a Future chain; the session lazily restarts if the shell dies.
@@ -122,7 +140,7 @@ class RootSession {
     proc.stdin.writeln('{ $script\n} 2>&1; echo "$marker:\$?"');
     await proc.stdin.flush();
 
-    final buf = StringBuffer();
+    final frame = RootReplyFrame(marker);
     final deadline = DateTime.now().add(timeout);
     while (true) {
       final remaining = deadline.difference(DateTime.now());
@@ -139,13 +157,8 @@ class RootSession {
         throw const _ShellDied();
       }
       final line = await lines.next;
-      final idx = line.indexOf(marker);
-      if (idx >= 0) {
-        final tail = line.substring(idx + marker.length + 1);
-        final code = int.tryParse(tail.trim()) ?? -1;
-        return ShellResult(code, buf.toString().trimRight());
-      }
-      buf.writeln(line);
+      final result = frame.addLine(line);
+      if (result != null) return result;
     }
   }
 

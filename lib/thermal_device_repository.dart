@@ -249,7 +249,9 @@ done
       for (final entry in encoded.entries) {
         final path = '$stage/files/${entry.key}';
         await _write(path, entry.value);
-        final readback = await _run("base64 '$path' | tr -d '\\n'");
+        final readback = await _run(
+          "base64 '$path' | tr -d '\\n'; printf '\\n'",
+        );
         if (!listEquals(base64Decode(readback), entry.value)) {
           throw StateError('Thermal staging readback failed: ${entry.key}');
         }
