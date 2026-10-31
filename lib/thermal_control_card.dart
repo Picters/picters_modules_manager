@@ -43,6 +43,7 @@ class _ThermalControlCardState extends State<ThermalControlCard> {
 
   double? _drag;
   bool? _pendingEnabled;
+  bool _applyingSlider = false;
   // Forty one-degree steps, followed by a separate magnetic Off endpoint.
   static const _normalEnd = 40 / 45;
 
@@ -74,7 +75,10 @@ class _ThermalControlCardState extends State<ThermalControlCard> {
   Future<void> _applySlider(double value) async {
     if (_controls.busy || _pendingEnabled != null) return;
     final snapped = _snap(value);
-    setState(() => _drag = snapped);
+    setState(() {
+      _drag = snapped;
+      _applyingSlider = true;
+    });
     try {
       if (snapped > 0.96) {
         await _controls.setThermalLimitDisabled(true);
@@ -89,7 +93,12 @@ class _ThermalControlCardState extends State<ThermalControlCard> {
     } finally {
       // Keep the chosen target visible throughout application; the controller
       // commits on success and retains the old profile on failure.
-      if (mounted) setState(() => _drag = null);
+      if (mounted) {
+        setState(() {
+          _drag = null;
+          _applyingSlider = false;
+        });
+      }
     }
   }
 
@@ -148,6 +157,30 @@ class _ThermalControlCardState extends State<ThermalControlCard> {
                   ),
                 ),
               ),
+              if (_pendingEnabled != null || _applyingSlider)
+                Padding(
+                  key: const ValueKey('thermal-apply-progress'),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _pendingEnabled == false
+                            ? 'Restoring stock profile…'
+                            : 'Applying thermal profile…',
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        minHeight: 4,
+                        borderRadius: BorderRadius.circular(4),
+                        semanticsLabel: _pendingEnabled == false
+                            ? 'Restoring stock thermal profile'
+                            : 'Applying thermal profile',
+                      ),
+                    ],
+                  ),
+                ),
               AnimatedSize(
                 duration: const Duration(milliseconds: 280),
                 curve: Curves.easeInOutCubic,

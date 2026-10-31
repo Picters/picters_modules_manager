@@ -51,6 +51,8 @@ void main() {
       slider().onChanged!(35 / 45);
       slider().onChangeEnd!(35 / 45);
       await tester.pump();
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(find.text('Applying thermal profile…'), findsOneWidget);
       expect(find.text('60 °C'), findsOneWidget);
       expect(controls.customTemp, 45);
       expect(slider().onChanged, isNull);
@@ -60,11 +62,48 @@ void main() {
       expect(slider().onChanged, isNull);
       repository.pending!.complete();
       await tester.pumpAndSettle();
+      expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(slider().onChanged, isNotNull);
       expect(controls.customTemp, fail ? 45 : 60);
       expect(find.text(fail ? '45 °C' : '60 °C'), findsOneWidget);
     });
   }
+
+  testWidgets('toggle shows progress during apply and stock restore', (
+    tester,
+  ) async {
+    final repository = _BlockingRepository();
+    final controls = DeviceControlsController(repository: repository);
+    addTearDown(controls.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppTheme(Brightness.dark),
+        home: Scaffold(
+          body: ThermalControlCard(preview: true, controller: controls),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final enable in [true, false]) {
+      repository.pending = Completer<void>();
+      await tester.tap(find.text('Custom throttling'));
+      await tester.pump();
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(
+        find.text(
+          enable ? 'Applying thermal profile…' : 'Restoring stock profile…',
+        ),
+        findsOneWidget,
+      );
+      expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNull);
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      repository.pending!.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNotNull);
+    }
+  });
 
   testWidgets(
     'drag previews only; release applies once with shared reboot flag',
