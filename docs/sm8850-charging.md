@@ -226,3 +226,39 @@ Three isolated script tests (four fixture cases) pass: preserve an initially
 disabled/enabled boost bit and unrelated bits, reject an unknown vendor before
 writing, and restore after a rejected enable. These emulate the documented
 command ABI; they are not phone verification.
+
+## Remaining screen-on limiter investigation
+
+The user's adapter is rated90W with its original cable. Sustained100W cannot be
+promised from this adapter. Xiaomi's official global Xiaomi17 specifications
+state100W wired HyperCharge (https://www.mi.com/global/product/xiaomi-17/specs/),
+which describes the phone capability, not this adapter's measured delivery.
+
+The power-boost phone test at20261101-001344 contains20 screen-Awake samples
+over48s. All masks are68 (original64), with battery power4.341–4.385W and
+42.0–42.8C. Buck volt_thermal_limit remains1000mA, wired_ctrl_limit14, and pump
+current remains3–5 in native units. Therefore reasserting boost cannot be treated
+as a solution. The script verified restoration of the original boost bit.
+
+The original thermald-devices.conf maps thermal_fcc_override to wired_chg_curr
+and battery to a battery cooling device. The app's Thermal Off changes selected
+CPU/GPU policy rules while preserving the charging rules. Both those rules and
+other charging software remain candidates; no individual writer is yet proven.
+
+A micharge-service screenStateChangedThread disassembly also exists, but its
+notification path opens a HID device and sends an o1g packet. This may belong
+to an accessory, so it must not be identified as the internal charging limiter
+merely because it contains screen-state strings. The service exposes a generic
+wired_ctrl_limit attribute; presence of a setter does not prove it authored14
+in this recording. The MCA smart-charge module separately propagates screen
+state to the vendor buck/ADSP implementation.
+
+`tools/collect-charging-path.sh` now records the relevant raw device-tree tables,
+mi_thermal_interface and MCA binaries/hashes, actual thermal files, cooling-device
+states, OEM screen/charging policy attributes, negotiated/charge-pump readings
+and filtered charging logs. It makes no control writes. Recording includes
+50 samples with power-manager screen state; sequential values are not atomic.
+An isolated smoke test runs the actual script, checks archive content and
+serial-property exclusion, and confirms all control nodes remain unchanged.
+No additional charging path is connected to the UI before identification and
+reversible device verification.
