@@ -19,6 +19,22 @@ void main() {
       },
     ],
   };
+  test('BakaSU combined release keeps matching manual packages', () {
+    final item = release(
+      'A17',
+      '20261031-1200',
+      packPrefix: 'Mi17_PictersKernelPack',
+    );
+    item['tag_name'] = 'Mi17_Kernel-BakaSU-20261031-1200';
+    for (final asset in item['assets'] as List) {
+      asset['name'] = (asset['name'] as String).replaceAll(
+        'ReSuki-g123-susfs',
+        'BakaSU-g123',
+      );
+    }
+    expect(newestManualReleaseCode([item], channel: 'A17'), 610311200);
+    expect(newestManualReleaseCode([item], channel: 'A16'), 0);
+  });
   test('manual releases notify for either channel', () {
     expect(
       newestManualReleaseCode([release('A16', '20260930-2330')]),

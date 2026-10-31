@@ -60,7 +60,7 @@ class ReleasesController extends ChangeNotifier {
 int newestManualReleaseCode(List<dynamic> releases, {String? channel}) {
   var newest = 0;
   final tagPattern = RegExp(
-    r'^(?:(A16|A17)|Mi17_Kernel-ReSuki-susfs)-(\d{8})-(\d{4})$',
+    r'^(?:(A16|A17)|Mi17_Kernel-(?:ReSuki-susfs|BakaSU))-(\d{8})-(\d{4})$',
   );
   if (channel != null && channel != 'A16' && channel != 'A17') {
     return 0;
