@@ -135,6 +135,34 @@ DeviceControlsController _controls(_Phone phone) => DeviceControlsController(
 
 void main() {
   test(
+    'inactive charging readback still releases a stale power request',
+    () async {
+      final phone = _Phone()
+        ..chargingAvailable = true
+        ..chargingEnabled = false
+        ..powerTarget = '120'
+        ..target = 'off';
+      final controller = _controls(phone);
+      addTearDown(controller.dispose);
+      await controller.init();
+      expect(controller.chargingEnabled, isFalse);
+      phone.scripts.clear();
+      expect(await controller.setCustomTemp(50), isTrue);
+      expect(phone.powerTarget, '100');
+      final stop = phone.scripts.indexWhere(
+        (s) => s.contains(
+          "sh '${XiaomiThermalRepository.chargingHelper}' restore",
+        ),
+      );
+      final activation = phone.scripts.indexWhere(
+        (s) => s.contains("sh '${XiaomiThermalRepository.helper}' apply"),
+      );
+      expect(stop, greaterThanOrEqualTo(0));
+      expect(stop, lessThan(activation));
+    },
+  );
+
+  test(
     'plaintext region routing metadata is neither decoded nor installed',
     () async {
       final phone = _Phone()..includeRegionMap = true;

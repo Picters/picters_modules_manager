@@ -144,7 +144,9 @@ else printf 'charging_available=0\\n'; fi
         'Choose a whole-watt target from 1 to 120 W.',
       );
     }
-    if (current.settings.chargingEnabled && !settings.chargingEnabled) {
+    // A failed worker/readback can report charging inactive while its vote
+    // still exists. Restore based on the requested state, not that health flag.
+    if (current.chargingAvailable && !settings.chargingEnabled) {
       await _run("sh '$chargingHelper' restore");
     }
     if (!{

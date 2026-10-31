@@ -14,7 +14,7 @@ real vendor export CRCs are pinned in `picters_charging/vendor.symvers`:
 The adapter has no private-structure access, dynamic symbol lookup or CFI bypass.
 
 Its own `picters_charging` client votes on the existing minimum elections
-`buck_input`, `single_chg_cur`, and `multi_chg_cur`. Disabled / Off calls
+`buck_input`, `buck_charge_curr`, `single_chg_cur`, and `multi_chg_cur`. Disabled / Off calls
 `mca_vote(..., false, 0)` for its own client, rather than writing a zero current
 through the quick-charge sysfs setter. A failed partial update releases its votes.
 The buck input-current target is derived from USB voltage; quick-charge battery
@@ -139,3 +139,57 @@ controls are retained under `artifacts/v1.4/charging-analysis`.
   device, cable, adapter, battery, temperature or negotiated-protocol limits.
 - Demo selections stay in memory. Production stores requested policies through
   the pack helper. Neither source tests nor successful writes prove real watts.
+
+## 2026-11-01 device investigation
+
+Build 18 capture with target 120 W contains a real 1000 mA winning
+`volt_thermal_limit` vote on the buck charge-current election and a 1600 mA
+`volt_limit` input vote. All samples still have the app request enabled, so this
+archive does not test disable/release or the reported 0.2 W event.
+
+The captured buck module references `volt_thermal_limit` in
+`strategy_buckchg_set_5v_ichg` (0x4738) and
+`strategy_buckchg_set_9v_ichg` (0x4810). Both use ordinary vendor votes, not a
+Picters-owned limit. The fourth election name `buck_charge_curr` is confirmed
+by the buck probe's .rodata+0x17c6 and charge-limit callback at 0x436c.
+The newly added buck-current vote makes a low Picters target cover the normal
+charging path too; it cannot raise an existing lower OEM ceiling.
+
+The user reports that charging accelerates with the display off. This establishes
+a useful correlation, not the exact cause: compare actual charger type, screen
+state, buck votes and charge-pump state in the same session. Do not overwrite
+`volt_thermal_limit`, force charge-pump enable, or treat `apdo_max=90` as measured
+power based solely on this archive. Thermal Off in the app edits selected
+CPU/GPU rules; its policy builder deliberately retains charging sections.
+
+The new read-only `effective_limits` driver attribute reports all four winning
+current ceilings and client names, separately from `power_target` and measured
+watts. It imports `mca_get_effective_result` (CRC 0x883255f3) and
+`mca_get_effective_client` (CRC 0x462d3f3e), as present in the supplied MCA ABI.
+Compilation against the existing A17 test kernel passed; no updated module
+was installed on a phone and no sustained-fast-charge result is established.
+
+The repository now sends charging restore even when the helper health flag has
+fallen to inactive, provided the verified charging backend is available. This
+prevents a failed status/worker from hiding a remaining leased vote. Charging
+apply failures are now shown in the UI instead of silently leaving the previous
+selection. These changes remain separate from the missing screen-mode backend.
+
+The later screen-off recording shows battery-terminal charging rising from
+about 4 W to 34.06 W, with charge-pump bus voltage 18212 and current 2113
+in its captured native units. The quick_charge_type attribute still reads 0,
+so this field must not be used alone to declare fast charging inactive.
+Its initial sample also has a transient positive battery current (net discharge);
+absolute current alone must not be labelled charging power.
+The buck vote changes 1000 to 3000 mA during the recording; it is then suspended
+by wire_qc while the pump works. Therefore removing the buck ceiling alone
+cannot be claimed to enable high-power pump charging.
+
+In the captured mca_smart_charge binary, smart_charge_panel_notifier_cb
+(0x20d4) queues screen-status propagation and the policy worker.
+smart_charge_set_screen_status_work (0x29cc) calls
+platform_class_buckchg_ops_set_screen_status. This confirms a vendor screen
+input; it does not establish a reversible user fast-charge override.
+The new screen-on switch below the power slider is preview-only. Production
+disables it with an explanatory tooltip until a verified backend is available;
+it does not spoof display state or report the mode applied.

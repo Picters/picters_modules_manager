@@ -5,6 +5,43 @@ import 'package:picters_modules_manager/theme.dart';
 import 'package:picters_modules_manager/device_controls.dart';
 
 void main() {
+  testWidgets('screen-on control is preview only until vendor support exists', (
+    tester,
+  ) async {
+    final controls = DeviceControlsController(preview: true);
+    addTearDown(controls.dispose);
+    await controls.setThermalLimitDisabled(true);
+    await controls.setPowerControlEnabled(true);
+    for (final preview in [false, true]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppTheme(Brightness.dark),
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ChargingPowerCard(
+                key: ValueKey(preview),
+                preview: preview,
+                controller: controls,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final row = find.byKey(const ValueKey('screen-on-fast-charge'));
+      final toggle = find.descendant(of: row, matching: find.byType(Switch));
+      expect(tester.widget<Switch>(toggle).onChanged != null, preview);
+      expect(tester.widget<Switch>(toggle).value, isFalse);
+      if (preview) {
+        await tester.ensureVisible(row);
+        await tester.tap(row);
+        await tester.pumpAndSettle();
+        expect(tester.widget<Switch>(toggle).value, isTrue);
+      }
+      expect(controls.inputLimit, 100);
+    }
+  });
+
   testWidgets(
     'thermal Off gates charging and leaving Off restores its defaults',
     (tester) async {
@@ -18,7 +55,7 @@ void main() {
           ),
         ),
       );
-      Switch toggle() => tester.widget<Switch>(find.byType(Switch));
+      Switch toggle() => tester.widget<Switch>(find.byType(Switch).first);
       expect(toggle().onChanged, isNull);
       await tester.tap(find.text('Charging power'));
       await tester.pumpAndSettle();
@@ -30,7 +67,7 @@ void main() {
       await controls.setThermalLimitDisabled(true);
       await tester.pumpAndSettle();
       expect(toggle().onChanged, isNotNull);
-      await tester.tap(find.byType(Switch));
+      await tester.tap(find.byType(Switch).first);
       await tester.pumpAndSettle();
       expect(find.byType(Slider), findsOneWidget);
       await controls.setInputLimit(55);
@@ -72,10 +109,10 @@ void main() {
     slider().onChangeEnd!(1);
     await tester.pumpAndSettle();
     expect(find.text('Off'), findsOneWidget);
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byType(Switch).first);
     await tester.pumpAndSettle();
     expect(find.byType(Slider), findsNothing);
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byType(Switch).first);
     await tester.pumpAndSettle();
     expect(find.text('100 W'), findsOneWidget);
     expect(find.text('Off'), findsNothing);

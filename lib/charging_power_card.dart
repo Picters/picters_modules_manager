@@ -5,6 +5,7 @@ import 'control_slider_shapes.dart';
 import 'control_surfaces.dart';
 import 'device_controls.dart';
 import 'widgets.dart';
+import 'theme.dart' show showError;
 
 /// Development UI; production writes require the captured charger interfaces.
 class ChargingPowerCard extends StatefulWidget {
@@ -27,6 +28,7 @@ class _ChargingPowerCardState extends State<ChargingPowerCard> {
       widget.controller ?? DeviceControlsController(preview: widget.preview);
   double? _drag;
   bool? _pendingEnabled;
+  bool _previewScreenOnFastCharge = false;
   static const _normalEnd = 119 / 134;
   static const _red = Color(0xFFFF8A80);
   bool get _enabled => _pendingEnabled ?? _controls.chargingEnabled;
@@ -53,6 +55,9 @@ class _ChargingPowerCardState extends State<ChargingPowerCard> {
     setState(() => _pendingEnabled = value);
     try {
       await _controls.setPowerControlEnabled(value);
+      if (mounted && _controls.lastError != null) {
+        showError(context, _controls.lastError!);
+      }
     } finally {
       if (mounted) setState(() => _pendingEnabled = null);
     }
@@ -67,6 +72,9 @@ class _ChargingPowerCardState extends State<ChargingPowerCard> {
         await _controls.clearInputLimit();
       } else {
         await _controls.setInputLimit((1 + selected * 134).roundToDouble());
+      }
+      if (mounted && _controls.lastError != null) {
+        showError(context, _controls.lastError!);
       }
     } finally {
       if (mounted) setState(() => _drag = null);
@@ -236,6 +244,47 @@ class _ChargingPowerCardState extends State<ChargingPowerCard> {
                                   ),
                                   const Spacer(flex: 15),
                                 ],
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Tooltip(
+                              message: widget.preview
+                                  ? 'Interface preview only'
+                                  : 'Screen-on charging control is not verified for this vendor.',
+                              child: Jelly(
+                                enabled: widget.preview && available,
+                                pressScale: 0.978,
+                                child: ListTile(
+                                  key: const ValueKey('screen-on-fast-charge'),
+                                  contentPadding: EdgeInsets.zero,
+                                  enabled: widget.preview && available,
+                                  title: const Text(
+                                    'Fast charging with screen on',
+                                  ),
+                                  trailing: JellySwitch(
+                                    value:
+                                        widget.preview &&
+                                        _previewScreenOnFastCharge,
+                                    onChanged: widget.preview && available
+                                        ? (value) {
+                                            HapticFeedback.selectionClick();
+                                            setState(
+                                              () => _previewScreenOnFastCharge =
+                                                  value,
+                                            );
+                                          }
+                                        : null,
+                                  ),
+                                  onTap: widget.preview && available
+                                      ? () {
+                                          HapticFeedback.selectionClick();
+                                          setState(
+                                            () => _previewScreenOnFastCharge =
+                                                !_previewScreenOnFastCharge,
+                                          );
+                                        }
+                                      : null,
+                                ),
                               ),
                             ),
                             const SizedBox(height: 12),
