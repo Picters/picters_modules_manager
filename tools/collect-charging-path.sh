@@ -69,8 +69,10 @@ read_value() {
   bounded head -c 4096 "$1" || true
   printf '\n'
 }
-printf 'RECORDING NOW. Leave charger and profile unchanged.\nKeep screen ON for 40 seconds, OFF for 40 seconds, then ON until Saved.\n'
+printf 'RECORDING NOW. Leave charger and profile unchanged.\nKeep screen ON for 40 seconds, OFF for 40 seconds, then ON until Saved.\nRecording is limited to about 100 seconds plus the last snapshot.\n'
+record_start=$(date +%s)
 for sample in $(seq 1 50); do
+  [ "$(( $(date +%s) - record_start ))" -lt 100 ] || break
   {
     printf '\n=== Sample %s ===\n' "$sample"
     date -u
@@ -87,6 +89,7 @@ for sample in $(seq 1 50); do
       done
     done
   } >> "$work/samples.txt" 2>&1
+  [ "$(( $(date +%s) - record_start ))" -lt 100 ] || break
   sleep 2
 done
 bounded logcat -d -t 8000 -v threadtime 2>/dev/null | grep -iE 'micharge|mca_|mi_thermald|wired_ctrl|volt_thermal|screenState|PMM_' | tail -c 524288 > "$work/policy-logcat.txt" || true

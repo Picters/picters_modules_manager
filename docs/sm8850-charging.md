@@ -262,3 +262,24 @@ An isolated smoke test runs the actual script, checks archive content and
 serial-property exclusion, and confirms all control nodes remain unchanged.
 No additional charging path is connected to the UI before identification and
 reversible device verification.
+
+## Synchronized path capture at96%
+
+The20261101-002800 archive has50 samples, all at96% SOC. PD_PPS and the
+charger common power_max both report90W capability. Awake has wired levels11
+then7, Dozing clears the level to0. The extracted15x10 wired_thermal table
+matches the reported buck-current ceilings: level11→2000mA,7→2600mA, and
+0 allows the default3000mA ceiling. Even with level0, battery power remains
+approximately4W at this near-full SOC. Therefore this recording establishes
+the screen-linked policy transition, but cannot validate maximum charging
+power or justify removing voltage/current cutbacks.
+
+104 ODM and102 active policies decoded with the real Java codec. CPU/GPU Off
+retains charging policies, as intended. The HAL messages for wired_ctrl_limit
+are reads; they do not establish it as the author of the levels.
+
+The collector is now bounded to approximately100 seconds of sampling plus the
+last sequential snapshot, rather than50 potentially slow full snapshots.
+Initial configuration capture and archive creation take additional time.
+A lower-SOC repetition of this same read-only capture is needed to evaluate
+the screen-on maximum with the90W adapter.
