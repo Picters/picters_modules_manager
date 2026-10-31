@@ -193,3 +193,36 @@ input; it does not establish a reversible user fast-charge override.
 The new screen-on switch below the power slider is preview-only. Production
 disables it with an explanatory tooltip until a verified backend is available;
 it does not spoof display state or report the mode applied.
+
+## Normal Xiaomi power-boost probe
+
+The matched `mca_smart_charge.ko` (SHA256
+`bc9321a44fb892f77c18739e83fbe956a06974f4a9946cf16ac01db1f2d605d7`)
+contains an ordinary power-boost control through
+`/sys/class/xm_power/charger/smart_charge/smart_chg`. The vendor init rc
+confirms this path. The status read is a decimal composite feature mask.
+The store handler routes smart_chg (attribute0) to the control-message decoder.
+Decoder bit2 selects power boost; bit0 enables it. Command5 enables that one
+feature, command4 disables it. Other feature bits must not be sent as a combined
+command: the decoder rejects multiple selected features.
+
+At 0xbd0–0xbe4 the decoder updates the power-boost state and calls
+smartcharging_handle_power_boost; at 0xf2c onward this forwards the normal boost
+setting through registered vendor operations. It does not by itself establish
+screen-on override behavior, a guaranteed wattage, or bypass of protections.
+
+`tools/test-power-boost.sh` matches the vendor module, saves the original boost
+bit, enables the normal boost command, verifies readback and reasserts this one
+feature if software clears it during twenty two-second sample intervals. It
+restores the original boost bit on completion or normal exit signals, retaining
+other OEM feature bits. A separate ninety-second fallback worker also attempts
+restoration if the collector is killed; device reboot remains the fallback if
+the entire process group is killed. It reports failed restoration explicitly.
+The script never edits thermal limits, display state, voltage ceilings or safety
+partitions. Run with the screen on and charger connected; the resulting archive
+is needed before connecting this backend to the app's screen-on switch.
+
+Three isolated script tests (four fixture cases) pass: preserve an initially
+disabled/enabled boost bit and unrelated bits, reject an unknown vendor before
+writing, and restore after a rejected enable. These emulate the documented
+command ABI; they are not phone verification.
