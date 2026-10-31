@@ -75,6 +75,10 @@ trap 'exit 129' HUP
   # No inherited cleanup trap: this worker must also survive the parent's exit.
   trap - EXIT INT TERM HUP
   sleep 90
+  [ -f "$boost_dir/restore-command" ] || exit 0
+  : > "$boost_dir/expired"
+  # Allow a previously started bounded write to finish before rollback.
+  sleep 4
   [ ! -f "$boost_dir/restore-command" ] || write_command "$boost_restore"
 ) </dev/null > "$boost_dir/watchdog.log" 2>&1 &
 boost_watchdog=$!
@@ -84,6 +88,7 @@ boost_mask=$(read_mask)
 [ "$((boost_mask / 4 % 2))" = 1 ] || { echo 'Vendor rejected power boost.' >&2; exit 1; }
 printf 'Power boost accepted. Keep charger connected and display ON for this test.\n'
 for boost_sample in $(seq 1 20); do
+  [ ! -f "$boost_dir/expired" ] || exit 1
   {
     printf '\n=== %s ===\n' "$boost_sample"
     date -u
@@ -91,6 +96,7 @@ for boost_sample in $(seq 1 20); do
     printf 'smart_chg_mask=%s\n' "$boost_mask"
     if [ "$((boost_mask / 4 % 2))" != 1 ]; then
       printf 'OEM cleared boost; reasserting the selected boost feature only.\n'
+      [ ! -f "$boost_dir/expired" ] || exit 1
       write_command 5
       boost_mask=$(read_mask)
       [ "$((boost_mask / 4 % 2))" = 1 ] || exit 1
