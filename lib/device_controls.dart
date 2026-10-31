@@ -405,6 +405,7 @@ class DeviceControlsController extends ChangeNotifier {
       state = next;
       return true;
     } catch (error) {
+      debugPrint('PMM_THERMAL: apply failed: $error');
       // A combined operation can restore charging before thermal activation
       // fails. Show the actual remaining state instead of the previous request.
       try {

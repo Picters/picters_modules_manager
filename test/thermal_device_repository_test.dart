@@ -26,6 +26,7 @@ class _Phone implements RootRunner {
   bool verified = true;
   bool corruptReadback = false;
   bool failStockRead = false;
+  bool includeRegionMap = false;
   bool failActivation = false;
   bool chargingAvailable = false;
   bool chargingEnabled = false;
@@ -63,7 +64,11 @@ class _Phone implements RootRunner {
       if (failStockRead) {
         return const ShellResult(1, 'root output transport failed');
       }
-      return ShellResult(0, '$filename|${base64Encode(utf8.encode(stock))}');
+      return ShellResult(
+        0,
+        '$filename|${base64Encode(utf8.encode(stock))}'
+        '${includeRegionMap ? "\nthermal-region-map.conf|${base64Encode(utf8.encode('2.11.0:thermal-map-gl.conf\n2.29.0:thermal-map-ind.conf'))}" : ""}',
+      );
     }
     if (script.contains('mktemp -d')) return const ShellResult(0, stage);
     final create = RegExp(r": > '([^']+)'").firstMatch(script);
@@ -115,12 +120,44 @@ class _Phone implements RootRunner {
 DeviceControlsController _controls(_Phone phone) => DeviceControlsController(
   repository: XiaomiThermalRepository(
     runner: phone,
-    decode: (bytes) async => utf8.decode(bytes),
+    decode: (bytes) async {
+      final text = utf8.decode(bytes);
+      if (text.startsWith('2.11.0:')) {
+        throw const FormatException(
+          'Routing metadata is not an encrypted policy',
+        );
+      }
+      return text;
+    },
     encode: (text) async => Uint8List.fromList(utf8.encode(text)),
   ),
 );
 
 void main() {
+  test(
+    'plaintext region routing metadata is neither decoded nor installed',
+    () async {
+      final phone = _Phone()..includeRegionMap = true;
+      final controller = _controls(phone);
+      addTearDown(controller.dispose);
+      await controller.init();
+      expect(await controller.setCustomTemp(45), isTrue);
+      expect(phone.installs, 1);
+      expect(controller.busy, isFalse);
+      expect(
+        phone.files.keys.any(
+          (path) => path.endsWith('thermal-region-map.conf'),
+        ),
+        isFalse,
+      );
+      expect(
+        phone.scripts.firstWhere(
+          (script) => script.contains('for PMM_FILE in'),
+        ),
+        contains('!= thermal-region-map.conf'),
+      );
+    },
+  );
   test(
     'stock read transport failure releases controls without installing a profile',
     () async {

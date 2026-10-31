@@ -5,6 +5,7 @@ import 'device_controls.dart';
 import 'control_slider_shapes.dart';
 import 'control_surfaces.dart';
 import 'widgets.dart';
+import 'theme.dart' show showError;
 
 /// The UI can be tried on desktop; device writes require a verified backend.
 class ThermalControlCard extends StatefulWidget {
@@ -62,6 +63,9 @@ class _ThermalControlCardState extends State<ThermalControlCard> {
       } else {
         await _controls.restoreThermalStock();
       }
+      if (mounted && _controls.lastError != null) {
+        showError(context, _controls.lastError!);
+      }
     } finally {
       if (mounted) setState(() => _pendingEnabled = null);
     }
@@ -78,6 +82,9 @@ class _ThermalControlCardState extends State<ThermalControlCard> {
         await _controls.setCustomTemp(
           (25 + (snapped / _normalEnd).clamp(0, 1) * 40).roundToDouble(),
         );
+      }
+      if (mounted && _controls.lastError != null) {
+        showError(context, _controls.lastError!);
       }
     } finally {
       // Keep the chosen target visible throughout application; the controller

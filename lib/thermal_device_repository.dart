@@ -105,7 +105,8 @@ else printf 'charging_available=0\\n'; fi
           inputLimit: double.tryParse(fields['power_target'] ?? '') ?? 100,
         ),
       );
-    } catch (_) {
+    } catch (error) {
+      debugPrint('PMM_THERMAL: verification failed: $error');
       return initialState;
     }
   }
@@ -194,6 +195,8 @@ else printf 'charging_available=0\\n'; fi
     final raw = await _run('''
 for PMM_FILE in /odm/etc/thermal-*.conf; do
   [ -f "\$PMM_FILE" ] && [ ! -L "\$PMM_FILE" ] || continue
+  # Routing metadata is plaintext and is not a thermal policy.
+  [ "\${PMM_FILE##*/}" != thermal-region-map.conf ] || continue
   PMM_SIZE=\$(stat -c %s "\$PMM_FILE")
   [ "\$PMM_SIZE" -gt 0 ] && [ "\$PMM_SIZE" -le 2097152 ]
   printf '%s|' "\${PMM_FILE##*/}"
@@ -215,7 +218,14 @@ done
       if (stock.length >= 256) {
         throw const FormatException('Too many stock policies.');
       }
-      stock[name] = await _decode(base64Decode(line.substring(split + 1)));
+      // This file routes firmware regions to scenario maps. It contains no
+      // thermal rules and must never enter the AES/profile pipeline.
+      if (name == 'thermal-region-map.conf') continue;
+      try {
+        stock[name] = await _decode(base64Decode(line.substring(split + 1)));
+      } catch (error) {
+        throw FormatException('Could not decode stock policy $name: $error');
+      }
     }
     debugPrint('PMM_THERMAL: decoded ${stock.length} stock policies');
     final pack = ThermalPolicyPack.prepare(
