@@ -170,7 +170,7 @@ class MainActivity : FlutterActivity() {
                 }.getOrDefault(false))
                 "openKernelReleases" -> result.success(runCatching {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(
-                        "https://github.com/Picters/android_kernel_xiaomi_sm8850-extra/releases/latest"
+                        "https://github.com/Picters/PictersKernel-Xiaomi17/releases/latest"
                     )))
                     true
                 }.getOrDefault(false))

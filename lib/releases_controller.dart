@@ -25,7 +25,7 @@ class ReleasesController extends ChangeNotifier {
       final req = await client
           .getUrl(
             Uri.parse(
-              'https://api.github.com/repos/Picters/android_kernel_xiaomi_sm8850-extra/releases/latest',
+              'https://api.github.com/repos/Picters/PictersKernel-Xiaomi17/releases/latest',
             ),
           )
           .timeout(const Duration(seconds: 10));
