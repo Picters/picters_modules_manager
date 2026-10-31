@@ -1,11 +1,12 @@
 package com.picters.modulesmanager;
 
 /**
- * Async reply channel for {@link IKernelService#exec}. Declared `oneway` so the
- * root service delivers results back to the app without ever blocking on the
- * caller — replies are fire-and-forget and correlated by requestId.
+ * Replies are correlated by requestId. Chunk callbacks are synchronous so
+ * Binder acknowledges each bounded parcel before the service sends another.
  */
-oneway interface IExecCallback {
+interface IExecCallback {
+    /** A bounded part of stdout; ordered before onComplete. */
+    void onOutputChunk(int requestId, String output);
     /** The script finished: merged stdout+stderr in [output], shell [exitCode]. */
     void onComplete(int requestId, int exitCode, String output);
 

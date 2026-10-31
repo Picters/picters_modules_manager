@@ -217,6 +217,7 @@ done
       }
       stock[name] = await _decode(base64Decode(line.substring(split + 1)));
     }
+    debugPrint('PMM_THERMAL: decoded ${stock.length} stock policies');
     final pack = ThermalPolicyPack.prepare(
       vendorFingerprint: _vendor!,
       stockPolicies: stock,
@@ -224,6 +225,7 @@ done
       disabled: settings.thermalLimitDisabled,
     );
     final encoded = await pack.encodeVerified(encode: _encode, decode: _decode);
+    debugPrint('PMM_THERMAL: staging ${encoded.length} verified policies');
     final stage = (await _run(
       "mkdir -p '$stateDir'; mktemp -d '$stateDir/.stage.XXXXXX'",
     )).trim();
@@ -255,6 +257,7 @@ done
         '$stage/persist',
         utf8.encode(settings.persistOnBoot ? '1' : '0'),
       );
+      debugPrint('PMM_THERMAL: activating staged profile');
       await _run('''
 (cd '$stage/files' && sha256sum thermal-*.conf) > '$stage/manifest.sha256'
 rm -rf '$stateDir/stage'

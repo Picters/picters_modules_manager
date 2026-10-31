@@ -83,6 +83,7 @@ flutter {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     // libsu: bootstraps and manages the root process that hosts the AIDL
     // RootService (KernelRootService). `core` = root shell, `service` = the
     // RootService/IPC bootstrap that hands the service's Binder back to the app.

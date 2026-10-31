@@ -25,6 +25,7 @@ target 1000
 class _Phone implements RootRunner {
   bool verified = true;
   bool corruptReadback = false;
+  bool failStockRead = false;
   bool failActivation = false;
   bool chargingAvailable = false;
   bool chargingEnabled = false;
@@ -59,6 +60,9 @@ class _Phone implements RootRunner {
           : const ShellResult(1, 'Device verification pending');
     }
     if (script.contains('for PMM_FILE in')) {
+      if (failStockRead) {
+        return const ShellResult(1, 'root output transport failed');
+      }
       return ShellResult(0, '$filename|${base64Encode(utf8.encode(stock))}');
     }
     if (script.contains('mktemp -d')) return const ShellResult(0, stage);
@@ -117,6 +121,25 @@ DeviceControlsController _controls(_Phone phone) => DeviceControlsController(
 );
 
 void main() {
+  test(
+    'stock read transport failure releases controls without installing a profile',
+    () async {
+      final phone = _Phone()..failStockRead = true;
+      final controller = _controls(phone);
+      addTearDown(controller.dispose);
+      await controller.init();
+      expect(await controller.setCustomTemp(45), isFalse);
+      expect(controller.busy, isFalse);
+      expect(controller.thermalPreset, ThermalPreset.stock);
+      expect(phone.installs, 0);
+      expect(phone.files, isEmpty);
+      expect(controller.lastError, contains('root output transport failed'));
+      phone.failStockRead = false;
+      expect(await controller.setCustomTemp(45), isTrue);
+      expect(controller.busy, isFalse);
+      expect(phone.installs, 1);
+    },
+  );
   test(
     'a failed thermal switch reports charging already restored to stock',
     () async {

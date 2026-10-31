@@ -44,6 +44,7 @@ class MainActivity : FlutterActivity() {
     private var kernelService: IKernelService? = null
     private var rootSink: EventChannel.EventSink? = null
     private var bindPending: MethodChannel.Result? = null
+    private val rootOutput = RootOutputBuffer()
 
     // Live only while Dart is listening to USB_EVENTS: forwards USB attach/detach
     // system broadcasts so the scan refreshes the instant an adapter is plugged.
@@ -53,13 +54,16 @@ class MainActivity : FlutterActivity() {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             kernelService = IKernelService.Stub.asInterface(service)
             Log.i("PKM_IPC", "onServiceConnected: apiVersion=${runCatching { kernelService?.apiVersion }.getOrNull()}")
-            bindPending?.success(true)
+            val compatible = runCatching { kernelService?.apiVersion == KernelRootService.API_VERSION }.getOrDefault(false)
+            if (!compatible) kernelService = null
+            bindPending?.success(compatible)
             bindPending = null
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
             Log.w("PKM_IPC", "onServiceDisconnected")
             kernelService = null
+            rootOutput.clear()
         }
 
         override fun onBindingDied(name: ComponentName?) {
@@ -73,15 +77,21 @@ class MainActivity : FlutterActivity() {
     // Results/errors from the root process arrive on a Binder thread; forward
     // them to the Flutter event sink on the main thread.
     private val execCallback = object : IExecCallback.Stub() {
+        override fun onOutputChunk(requestId: Int, output: String?) {
+            rootOutput.append(requestId, output ?: "")
+        }
+
         override fun onComplete(requestId: Int, exitCode: Int, output: String?) {
+            val complete = rootOutput.finish(requestId, output ?: "")
             mainHandler.post {
                 rootSink?.success(
-                    mapOf("id" to requestId, "code" to exitCode, "out" to (output ?: "")),
+                    mapOf("id" to requestId, "code" to exitCode, "out" to complete),
                 )
             }
         }
 
         override fun onError(requestId: Int, message: String?) {
+            rootOutput.remove(requestId)
             mainHandler.post {
                 rootSink?.success(mapOf("id" to requestId, "err" to (message ?: "error")))
             }
@@ -214,10 +224,13 @@ class MainActivity : FlutterActivity() {
             return
         }
         try {
+            rootOutput.start(id)
+            mainHandler.postDelayed({ rootOutput.remove(id) }, (timeoutMs ?: 30000).toLong() + 15000)
             svc.exec(id, script, timeoutMs ?: 30000, execCallback)
             result.success(true)
         } catch (t: Throwable) {
             // Binder died — drop the reference so the app falls back to the pipe.
+            rootOutput.remove(id)
             kernelService = null
             result.success(false)
         }

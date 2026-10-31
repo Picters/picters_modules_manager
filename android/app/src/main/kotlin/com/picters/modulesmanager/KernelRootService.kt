@@ -50,10 +50,23 @@ class KernelRootService : RootService() {
                 // Drain output on a side thread so a large payload can't deadlock
                 // against waitFor() by filling the pipe buffer.
                 val sb = StringBuilder()
+                var outputError: Throwable? = null
                 val reader = Thread {
                     try {
-                        proc.inputStream.bufferedReader().forEachLine { sb.appendLine(it) }
-                    } catch (_: Throwable) {
+                        val buffer = CharArray(8192)
+                        proc.inputStream.bufferedReader().use { input ->
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                check(sb.length + count <= RootOutputBuffer.MAX_CHARS) {
+                                    "Root command output exceeds the supported size"
+                                }
+                                sb.append(buffer, 0, count)
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        outputError = error
+                        proc.destroyForcibly()
                     }
                 }
                 reader.start()
@@ -66,7 +79,19 @@ class KernelRootService : RootService() {
                     return
                 }
                 reader.join(1000)
-                cb.onComplete(requestId, proc.exitValue(), sb.toString().trimEnd('\n'))
+                check(!reader.isAlive) { "Root command output did not close" }
+                outputError?.let { throw it }
+                val output = sb.toString().trimEnd('\n')
+                var offset = 0
+                while (offset < output.length) {
+                    val end = minOf(offset + 8192, output.length)
+                    cb.onOutputChunk(requestId, output.substring(offset, end))
+                    offset = end
+                }
+                if (output.length > 8192) {
+                    Log.i(TAG, "exec #$requestId delivered ${output.length} chars in bounded chunks")
+                }
+                cb.onComplete(requestId, proc.exitValue(), "")
             } catch (t: Throwable) {
                 Log.w(TAG, "exec #$requestId failed", t)
                 try {
@@ -78,6 +103,6 @@ class KernelRootService : RootService() {
     }
 
     companion object {
-        const val API_VERSION = 1
+        const val API_VERSION = 2
     }
 }

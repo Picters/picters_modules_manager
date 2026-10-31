@@ -17,10 +17,12 @@ class BinderRoot {
   BinderRoot._();
   static final BinderRoot instance = BinderRoot._();
 
-  static const MethodChannel _method =
-      MethodChannel('com.picters.modulesmanager/system');
-  static const EventChannel _events =
-      EventChannel('com.picters.modulesmanager/system/root_events');
+  static const MethodChannel _method = MethodChannel(
+    'com.picters.modulesmanager/system',
+  );
+  static const EventChannel _events = EventChannel(
+    'com.picters.modulesmanager/system/root_events',
+  );
 
   bool _ready = false;
   bool get ready => _ready;
@@ -54,10 +56,15 @@ class BinderRoot {
     if (completer == null || completer.isCompleted) return;
     final err = event['err'] as String?;
     if (err != null) {
-      completer.completeError(StateError(err));
+      // The service accepted and executed this request. Report its failure
+      // without replaying a possibly mutating script through the su fallback.
+      completer.complete(ShellResult(-1, err));
     } else {
       completer.complete(
-        ShellResult((event['code'] as int?) ?? -1, (event['out'] as String?) ?? ''),
+        ShellResult(
+          (event['code'] as int?) ?? -1,
+          (event['out'] as String?) ?? '',
+        ),
       );
     }
   }
@@ -72,7 +79,8 @@ class BinderRoot {
 
     bool accepted;
     try {
-      accepted = await _method.invokeMethod<bool>('execRoot', {
+      accepted =
+          await _method.invokeMethod<bool>('execRoot', {
             'id': id,
             'script': script,
             'timeoutMs': timeout.inMilliseconds,
