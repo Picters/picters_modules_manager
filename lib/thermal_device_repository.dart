@@ -23,8 +23,6 @@ class XiaomiThermalRepository implements DeviceControlsRepository {
   final Future<Uint8List> Function(String) _encode;
   static const helper = '/data/adb/modules/picters-modules-pack/thermalctl.sh';
   static const stateDir = '/data/adb/picters_modules_manager/thermal';
-  static const chargingHelper =
-      '/data/adb/modules/picters-modules-pack/chargingctl.sh';
   bool _stockPersist = false;
   int _lastTemperature = 45;
   String? _vendor;
@@ -61,9 +59,6 @@ PMM_LOADER=\${PMM_LOADER%% *}
 [ "\$PMM_LOADER" = df25b03dfb7081c6b85e130a457f48b049c0f2056979ee407208d5fdf86b057e ]
 printf 'vendor=%s\\n' "\$PMM_VENDOR"
 sh '$helper' status
-if PMM_CHARGING=\$(sh '$chargingHelper' status 2>/dev/null); then
-  printf 'charging_available=1\\n%s\\n' "\$PMM_CHARGING"
-else printf 'charging_available=0\\n'; fi
 ''');
       final fields = <String, String>{};
       for (final line in output.split('\n')) {
@@ -90,7 +85,6 @@ else printf 'charging_available=0\\n'; fi
       return DeviceControlsState(
         support: DeviceControlSupport.available,
         thermalAvailable: true,
-        chargingAvailable: fields['charging_available'] == '1',
         settings: DeviceControlSettings(
           thermalPreset: target == 'stock'
               ? ThermalPreset.stock
@@ -100,9 +94,6 @@ else printf 'charging_available=0\\n'; fi
           persistOnBoot: target == 'stock'
               ? _stockPersist
               : fields['persist'] == '1',
-          chargingEnabled: fields['charging'] == '1',
-          inputLimitDisabled: fields['power_target'] == 'off',
-          inputLimit: double.tryParse(fields['power_target'] ?? '') ?? 100,
         ),
       );
     } catch (error) {
@@ -125,30 +116,6 @@ else printf 'charging_available=0\\n'; fi
     if (!current.thermalAvailable) {
       throw UnsupportedError(DeviceControlsController.verificationPending);
     }
-    if (settings.bypassRequested || settings.chargeLimit != 100) {
-      throw UnsupportedError(
-        'Battery bypass and charge ceilings are unsupported.',
-      );
-    }
-    if (settings.chargingEnabled &&
-        (!current.chargingAvailable ||
-            settings.thermalPreset != ThermalPreset.custom ||
-            !settings.thermalLimitDisabled)) {
-      throw UnsupportedError(DeviceControlsController.powerRequiresThermalOff);
-    }
-    if (!settings.inputLimit.isFinite ||
-        settings.inputLimit != settings.inputLimit.roundToDouble() ||
-        settings.inputLimit < 1 ||
-        settings.inputLimit > 120) {
-      throw const FormatException(
-        'Choose a whole-watt target from 1 to 120 W.',
-      );
-    }
-    // A failed worker/readback can report charging inactive while its vote
-    // still exists. Restore based on the requested state, not that health flag.
-    if (current.chargingAvailable && !settings.chargingEnabled) {
-      await _run("sh '$chargingHelper' restore");
-    }
     if (!{
       ThermalPreset.stock,
       ThermalPreset.custom,
@@ -166,23 +133,10 @@ else printf 'charging_available=0\\n'; fi
       await _install(settings);
     }
     _stockPersist = settings.persistOnBoot;
-    if (settings.chargingEnabled) {
-      final power = settings.inputLimitDisabled
-          ? 'off'
-          : settings.inputLimit.toInt().toString();
-      await _run(
-        "sh '$chargingHelper' apply $power ${settings.persistOnBoot ? 1 : 0}",
-      );
-    }
     final next = await scan();
     if (!next.thermalAvailable ||
         next.settings.thermalPreset != settings.thermalPreset ||
         next.settings.persistOnBoot != settings.persistOnBoot ||
-        next.settings.chargingEnabled != settings.chargingEnabled ||
-        (settings.chargingEnabled &&
-            (next.settings.inputLimitDisabled != settings.inputLimitDisabled ||
-                (!settings.inputLimitDisabled &&
-                    next.settings.inputLimit != settings.inputLimit))) ||
         (settings.thermalPreset == ThermalPreset.custom &&
             (next.settings.thermalLimitDisabled !=
                     settings.thermalLimitDisabled ||

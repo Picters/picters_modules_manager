@@ -28,9 +28,6 @@ class _Phone implements RootRunner {
   bool failStockRead = false;
   bool includeRegionMap = false;
   bool failActivation = false;
-  bool chargingAvailable = false;
-  bool chargingEnabled = false;
-  String powerTarget = '100';
   String filename = 'thermal-normal.conf';
   String target = 'stock';
   String persist = '0';
@@ -54,9 +51,7 @@ class _Phone implements RootRunner {
       return verified
           ? ShellResult(
               0,
-              'vendor=fixture-vendor\ntarget=$target\npersist=$persist\n'
-              'charging_available=${chargingAvailable ? 1 : 0}\n'
-              'charging=${chargingEnabled ? 1 : 0}\npower_target=$powerTarget',
+              'vendor=fixture-vendor\ntarget=$target\npersist=$persist\n',
             )
           : const ShellResult(1, 'Device verification pending');
     }
@@ -101,18 +96,6 @@ class _Phone implements RootRunner {
     )) {
       persist = RegExp(r'persist ([01])').firstMatch(script)![1]!;
     }
-    if (script.contains(
-      "sh '${XiaomiThermalRepository.chargingHelper}' apply",
-    )) {
-      final match = RegExp(r'apply (off|[0-9]+) ([01])').firstMatch(script)!;
-      chargingEnabled = true;
-      powerTarget = match[1]!;
-    } else if (script.contains(
-      "sh '${XiaomiThermalRepository.chargingHelper}' restore",
-    )) {
-      chargingEnabled = false;
-      powerTarget = '100';
-    }
     return const ShellResult(0, '');
   }
 }
@@ -134,34 +117,6 @@ DeviceControlsController _controls(_Phone phone) => DeviceControlsController(
 );
 
 void main() {
-  test(
-    'inactive charging readback still releases a stale power request',
-    () async {
-      final phone = _Phone()
-        ..chargingAvailable = true
-        ..chargingEnabled = false
-        ..powerTarget = '120'
-        ..target = 'off';
-      final controller = _controls(phone);
-      addTearDown(controller.dispose);
-      await controller.init();
-      expect(controller.chargingEnabled, isFalse);
-      phone.scripts.clear();
-      expect(await controller.setCustomTemp(50), isTrue);
-      expect(phone.powerTarget, '100');
-      final stop = phone.scripts.indexWhere(
-        (s) => s.contains(
-          "sh '${XiaomiThermalRepository.chargingHelper}' restore",
-        ),
-      );
-      final activation = phone.scripts.indexWhere(
-        (s) => s.contains("sh '${XiaomiThermalRepository.helper}' apply"),
-      );
-      expect(stop, greaterThanOrEqualTo(0));
-      expect(stop, lessThan(activation));
-    },
-  );
-
   test(
     'plaintext region routing metadata is neither decoded nor installed',
     () async {
@@ -205,53 +160,6 @@ void main() {
       expect(phone.installs, 1);
     },
   );
-  test(
-    'a failed thermal switch reports charging already restored to stock',
-    () async {
-      final phone = _Phone()..chargingAvailable = true;
-      final controller = _controls(phone);
-      addTearDown(controller.dispose);
-      await controller.init();
-      await controller.setThermalLimitDisabled(true);
-      await controller.setPowerControlEnabled(true);
-      phone.failActivation = true;
-      expect(await controller.setCustomTemp(50), isFalse);
-      expect(controller.thermalLimitDisabled, isTrue);
-      expect(controller.chargingEnabled, isFalse);
-      expect(controller.lastError, isNotNull);
-    },
-  );
-  test(
-    'MCA targets require thermal Off and clear before leaving Off',
-    () async {
-      final phone = _Phone()..chargingAvailable = true;
-      final controller = _controls(phone);
-      addTearDown(controller.dispose);
-      await controller.init();
-      expect(controller.inputLimitSupported, isTrue);
-      expect(await controller.setPowerControlEnabled(true), isFalse);
-      expect(await controller.setThermalLimitDisabled(true), isTrue);
-      expect(await controller.setPowerControlEnabled(true), isTrue);
-      expect(await controller.setInputLimit(55), isTrue);
-      expect(phone.powerTarget, '55');
-      expect(await controller.clearInputLimit(), isTrue);
-      expect(phone.powerTarget, 'off');
-      phone.scripts.clear();
-      expect(await controller.setCustomTemp(50), isTrue);
-      expect(phone.chargingEnabled, isFalse);
-      final stop = phone.scripts.indexWhere(
-        (s) => s.contains(
-          "sh '${XiaomiThermalRepository.chargingHelper}' restore",
-        ),
-      );
-      final thermal = phone.scripts.indexWhere(
-        (s) => s.contains("sh '${XiaomiThermalRepository.helper}' apply"),
-      );
-      expect(stop, greaterThanOrEqualTo(0));
-      expect(stop, lessThan(thermal));
-    },
-  );
-
   test('no device verification means no staging or native writes', () async {
     final phone = _Phone()..verified = false;
     final controller = _controls(phone);
@@ -271,7 +179,6 @@ void main() {
       addTearDown(controller.dispose);
       await controller.init();
       expect(controller.thermalSupported, isTrue);
-      expect(controller.inputLimitSupported, isFalse);
       expect(await controller.setCustomTemp(55), isTrue);
       expect(controller.customTemp, 55);
       final text = utf8.decode(

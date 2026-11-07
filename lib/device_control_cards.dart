@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 
-import 'charging_power_card.dart';
 import 'device_controls.dart';
 import 'thermal_control_card.dart';
 
-/// Both controls observe one applied state, including shared reboot persistence.
+/// Thermal controls retain the shared reboot-persistence setting.
 class DeviceControlCards extends StatefulWidget {
   const DeviceControlCards({
     super.key,
@@ -42,12 +41,6 @@ class _DeviceControlCardsState extends State<DeviceControlCards> {
   Widget build(BuildContext context) => Column(
     children: [
       ThermalControlCard(
-        preview: widget.preview,
-        persistOnBoot: widget.persistOnBoot,
-        controller: _controls,
-      ),
-      const SizedBox(height: 16),
-      ChargingPowerCard(
         preview: widget.preview,
         persistOnBoot: widget.persistOnBoot,
         controller: _controls,

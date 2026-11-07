@@ -15,7 +15,6 @@ import 'widgets.dart';
 ///   so rt73usb / rtl8187 resolve their selected symbols); they auto-load as
 ///   deps and aren't standalone drivers, so a toggle row for them only confuses.
 const Set<String> _hiddenModules = {
-  'picters_charging',
   'cfg80211',
   'mac80211',
   'crc-itu-t',

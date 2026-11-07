@@ -57,7 +57,8 @@ void main() {
             )
             .height;
         expect(rowHeight('Custom throttling'), rowHeight('Keep after reboot'));
-        expect(rowHeight('Charging power'), rowHeight('Keep after reboot'));
+        expect(find.text('Charging power'), findsNothing);
+        expect(find.text('Fast charging with screen on'), findsNothing);
 
         await tester.tap(find.byTooltip('Balanced'));
         await tester.pump();
