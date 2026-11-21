@@ -43,7 +43,7 @@ void main() {
         final picker = find.byKey(const ValueKey('performance-profile-picker'));
         expect(picker, findsOneWidget);
         expect(find.text('Gaming'), findsNothing);
-        expect(find.byTooltip('Gaming'), findsOneWidget);
+        expect(find.byTooltip('Gaming'), findsNothing);
         expect(find.text('Custom throttling'), findsOneWidget);
         expect(find.text('Battery controls'), findsNothing);
         double rowHeight(String title) => tester
@@ -66,22 +66,6 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         expect(controller.perf.profile, PerfProfile.balanced);
         expect(tester.takeException(), isNull);
-        await tester.tap(find.byTooltip('Gaming'));
-        await tester.pump();
-        expect(controller.perf.busy, isTrue);
-        expect(controller.perf.pendingProfile, PerfProfile.gaming);
-        expect(find.text('Gaming profile'), findsOneWidget);
-        await tester.pump(const Duration(milliseconds: 500));
-        expect(controller.perf.profile, PerfProfile.gaming);
-        expect(controller.perf.state.gamingActive, isTrue);
-        expect(find.byTooltip('Previous profile'), findsNothing);
-        expect(find.byTooltip('Next profile'), findsNothing);
-        expect(
-          tester
-              .widgetList<ReelPill>(find.byType(ReelPill))
-              .every((pill) => pill.accent == const Color(0xFFFF8A80)),
-          isTrue,
-        );
         await tester.tap(find.byTooltip('Full'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
@@ -115,8 +99,10 @@ void main() {
         expect(tester.takeException(), isNull);
       } finally {
         semantics.dispose();
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
         await tester.pumpWidget(const SizedBox());
-        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
       }
     },
   );

@@ -3,11 +3,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:picters_modules_manager/module_info.dart';
 import 'package:picters_modules_manager/native_bridge.dart';
 import 'package:picters_modules_manager/perf_info.dart';
+import 'package:picters_modules_manager/perf_controller.dart';
 import 'package:picters_modules_manager/preview_backend.dart';
 import 'package:picters_modules_manager/preview_environment.dart';
 import 'package:picters_modules_manager/root_shell.dart';
 
 void main() {
+  test('retired Gaming restores Full and preserves boot persistence', () async {
+    final repo = PreviewPerfRepository();
+    await repo.applyProfile(
+      profile: PerfProfile.gaming,
+      state: await repo.scan(),
+      persistOnBoot: true,
+    );
+    final perf = PerfController(repo);
+    addTearDown(perf.dispose);
+    await perf.init();
+    expect(perf.profile, PerfProfile.full);
+    expect(perf.state.gamingActive, isFalse);
+    expect(perf.persistOnBoot, isTrue);
+    await perf.setProfile(PerfProfile.gaming);
+    expect(perf.profile, PerfProfile.full);
+  });
+
   test(
     'desktop preview blocks both root entry points and native storage',
     () async {
@@ -53,7 +71,7 @@ void main() {
       expect(controller.state.interfaces.single.driver, '88XXau');
 
       await controller.perf.setProfile(PerfProfile.gaming);
-      expect(controller.perf.state.gamingActive, isTrue);
+      expect(controller.perf.state.gamingActive, isFalse);
       expect(controller.perf.state.frequenciesLocked, isFalse);
       await controller.perf.setFrequencyLock(true);
       expect(controller.perf.state.lockActive, isTrue);

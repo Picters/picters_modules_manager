@@ -372,7 +372,12 @@ class _ProfileRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    const profiles = PerfProfile.values;
+    const profiles = [
+      PerfProfile.ultraEco,
+      PerfProfile.eco,
+      PerfProfile.balanced,
+      PerfProfile.full,
+    ];
     return Container(
       key: const ValueKey('performance-profile-picker'),
       padding: const EdgeInsets.all(4),
@@ -390,7 +395,11 @@ class _ProfileRail extends StatelessWidget {
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOutCubic,
-                  left: profiles.indexOf(profile) * width,
+                  left:
+                      (profiles.contains(profile)
+                          ? profiles.indexOf(profile)
+                          : profiles.indexOf(PerfProfile.full)) *
+                      width,
                   top: 0,
                   bottom: 0,
                   width: width,

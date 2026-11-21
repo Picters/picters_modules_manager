@@ -30,12 +30,39 @@ class PerfController extends ChangeNotifier {
   Future<void> refresh() async {
     final s = await _repo.scan();
     if (_disposed) return;
-    state = s;
+    // Retire saved Gaming settings through the normal restore transaction,
+    // including its governor backups and persisted boot profile.
+    if (s.profile == PerfProfile.gaming) {
+      final wasBusy = busy;
+      busy = true;
+      state = s;
+      notifyListeners();
+      try {
+        final result = await _repo.applyProfile(
+          profile: PerfProfile.full,
+          state: s,
+          persistOnBoot: s.persistOnBoot,
+        );
+        if (_disposed) return;
+        state = await _repo.scan();
+        if (_disposed) return;
+        if (!result.ok || !result.stdout.contains('OK_PERF')) {
+          lastError =
+              'Could not restore the standard profile: ${result.errorSummary}';
+        }
+      } catch (e) {
+        lastError = 'Could not restore the standard profile: $e';
+      } finally {
+        busy = wasBusy;
+      }
+    } else {
+      state = s;
+    }
     notifyListeners();
   }
 
   Future<void> setProfile(PerfProfile p) async {
-    if (busy) return;
+    if (busy || p == PerfProfile.gaming) return;
     pendingProfile = p;
     busy = true;
     lastError = null;
