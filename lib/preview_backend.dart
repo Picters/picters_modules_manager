@@ -242,6 +242,8 @@ class PreviewModuleRepository extends ModuleRepository {
   @override
   Future<String?> installedReleaseChannel() async => 'A16';
   @override
+  Future<bool?> pictersKernelDetected() async => true;
+  @override
   Future<String> kernelRelease() async =>
       '6.12.23-android16-picters-ReSuki-preview';
   @override

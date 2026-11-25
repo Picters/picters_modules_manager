@@ -35,6 +35,30 @@ void main() {
     expect(newestManualReleaseCode([item], channel: 'A17'), 610311200);
     expect(newestManualReleaseCode([item], channel: 'A16'), 0);
   });
+  test('ordered combined assets allow independent Android build times', () {
+    final a17 = release(
+      'A17',
+      '20261125-2315',
+      packPrefix: 'Mi17_PictersKernelPack',
+    );
+    final a16 = release(
+      'A16',
+      '20261126-0030',
+      packPrefix: 'Mi17_PictersKernelPack',
+    );
+    final assets = [...a17['assets'], ...a16['assets']];
+    for (var i = 0; i < assets.length; i++) {
+      assets[i]['name'] = '0${i + 1}-${assets[i]['name']}';
+    }
+    final combined = {
+      'tag_name': 'Mi17_Kernel-BakaSU-20261126-0100',
+      'assets': assets,
+    };
+    expect(newestManualReleaseCode([combined], channel: 'A17'), 611260100);
+    expect(newestManualReleaseCode([combined], channel: 'A16'), 611260100);
+    assets.removeLast();
+    expect(newestManualReleaseCode([combined], channel: 'A16'), 0);
+  });
   test('manual releases notify for either channel', () {
     expect(
       newestManualReleaseCode([release('A16', '20260930-2330')]),

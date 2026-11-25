@@ -572,8 +572,8 @@ class _KernelWarningBanner extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Not running the Picters kernel — Wi-Fi injection and the '
-                  'bundled modules may not work.',
+                  'Picters kernel features were not detected. Wi-Fi injection '
+                  'and bundled modules may be unavailable.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: scheme.onErrorContainer,
                     fontWeight: FontWeight.w500,

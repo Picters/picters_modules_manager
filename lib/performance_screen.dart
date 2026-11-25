@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'perf_controller.dart';
-import 'device_control_cards.dart';
 import 'control_surfaces.dart';
 import 'perf_info.dart';
 import 'theme.dart';
@@ -61,11 +60,6 @@ class PerformanceScreen extends StatelessWidget {
               )
             else
               const _UpdateModuleNote(),
-            const SizedBox(height: 16),
-            DeviceControlCards(
-              preview: preview,
-              persistOnBoot: controller.persistOnBoot,
-            ),
             if (state.bootApplySupported) ...[
               const SizedBox(height: 26),
               const SectionHeader(

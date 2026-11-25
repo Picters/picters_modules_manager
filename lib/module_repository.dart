@@ -747,8 +747,34 @@ class ModuleRepository {
     return channels.length == 1 ? channels.single : null;
   }
 
-  /// The running kernel's release string (`uname -r`) — the app checks it for
-  /// the "picters" tag to warn when it's running on a foreign kernel.
+  /// Kernel-owned sysfs survives uname spoofing. A pack on disk alone does
+  /// not establish which kernel is booted. Failed/incomplete probes are unknown.
+  Future<bool?> pictersKernelDetected() async {
+    final r = await _shell.run(r'''
+pmm_release=$(uname -r 2>/dev/null) || pmm_release=
+printf 'PMM_RELEASE:%s\n' "$pmm_release"
+if [ -r /sys/kernel/picters_perf/available ] &&
+   [ -r /sys/kernel/picters_perf/cpu_max_freq ]; then
+  printf 'PMM_INTERFACE:present\n'
+else
+  printf 'PMM_INTERFACE:absent\n'
+fi
+printf 'PMM_KERNEL_PROBE:complete\n'
+''');
+    if (!r.ok) return null;
+    final lines = r.stdout.split('\n').map((line) => line.trim()).toList();
+    if (!lines.contains('PMM_KERNEL_PROBE:complete')) return null;
+    if (lines.contains('PMM_INTERFACE:present')) return true;
+    final release = lines
+        .where((line) => line.startsWith('PMM_RELEASE:'))
+        .map((line) => line.substring('PMM_RELEASE:'.length))
+        .firstOrNull;
+    if (release == null || release.isEmpty) return null;
+    if (release.toLowerCase().contains('picters')) return true;
+    return lines.contains('PMM_INTERFACE:absent') ? false : null;
+  }
+
+  /// The running kernel's visible release string; root hiding may spoof it.
   Future<String> kernelRelease() async {
     final r = await _shell.run('uname -r 2>/dev/null');
     return r.stdout.trim();

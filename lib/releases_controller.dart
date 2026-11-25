@@ -86,12 +86,18 @@ int newestManualReleaseCode(List<dynamic> releases, {String? channel}) {
         : ['A16', 'A17'];
     final assets = release['assets'];
     if (assets is! List) continue;
-    final names = assets.whereType<Map>().map((a) => a['name']).toSet();
+    // Numeric prefixes keep the four downloads in the intended release order.
+    final names = assets
+        .whereType<Map>()
+        .map((a) => a['name'])
+        .whereType<String>()
+        .map((name) => name.replaceFirst(RegExp(r'^0[1-4]-'), ''))
+        .toSet();
     final hasPair = channels.any((releaseChannel) {
       final android = releaseChannel == 'A16' ? 'android16' : 'android17';
-      final stamp = '${match.group(2)}-${match.group(3)}';
+      // Each Android pair may have its own build timestamp.
       final kernelPattern = RegExp(
-        '^Mi17_Kernel-[0-9]+\\.[0-9]+\\.[0-9]+-$android-[A-Za-z0-9._+-]+-$stamp\\.zip\$',
+        '^Mi17_Kernel-[0-9]+\\.[0-9]+\\.[0-9]+-$android-[A-Za-z0-9._+-]+-[0-9]{8}-[0-9]{4}\\.zip\$',
       );
       final kernelNames = names.whereType<String>().where(
         kernelPattern.hasMatch,

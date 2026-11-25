@@ -62,9 +62,8 @@ class AppController extends ChangeNotifier {
   bool onPictersKernel = true;
 
   Future<void> _checkKernelAuthentic() async {
-    final r = await _repo.kernelRelease();
-    if (_disposed) return;
-    final ok = r.toLowerCase().contains('picters');
+    final ok = await _repo.pictersKernelDetected();
+    if (_disposed || ok == null) return;
     if (ok == onPictersKernel) return;
     onPictersKernel = ok;
     notifyListeners();

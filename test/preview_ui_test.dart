@@ -44,7 +44,7 @@ void main() {
         expect(picker, findsOneWidget);
         expect(find.text('Gaming'), findsNothing);
         expect(find.byTooltip('Gaming'), findsNothing);
-        expect(find.text('Custom throttling'), findsOneWidget);
+        expect(find.text('Custom throttling'), findsNothing);
         expect(find.text('Battery controls'), findsNothing);
         double rowHeight(String title) => tester
             .getSize(
@@ -56,7 +56,6 @@ void main() {
                   .first,
             )
             .height;
-        expect(rowHeight('Custom throttling'), rowHeight('Keep after reboot'));
         expect(find.text('Charging power'), findsNothing);
         expect(find.text('Fast charging with screen on'), findsNothing);
 
