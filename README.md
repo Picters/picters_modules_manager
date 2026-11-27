@@ -19,4 +19,4 @@ flutter build apk --debug     # adds a launcher icon for sideloading
 
 ## Credits
 
-Root: **ReSukiSU / KernelSU** · Injection drivers: **aircrack-ng**, **morrownr**.
+Root: **BakaSU / KernelSU** · Injection drivers: **aircrack-ng**, **morrownr**.
